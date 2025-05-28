@@ -84,6 +84,9 @@ namespace AIRefactored.AI.Groups
 
         #region Tick
 
+        /// <summary>
+        /// Tick externally from BotBrain. Recomputes formation and drift on squad size change or drift interval.
+        /// </summary>
         public void Tick(float deltaTime)
         {
             if (_bot == null || _group == null)
@@ -105,11 +108,17 @@ namespace AIRefactored.AI.Groups
 
         #region Offset API
 
+        /// <summary>
+        /// Applies this bot's squad offset to the specified vector.
+        /// </summary>
         public Vector3 ApplyOffsetTo(Vector3 target)
         {
             return target + GetCurrentOffset();
         }
 
+        /// <summary>
+        /// Gets the current squad offset for this bot, including live drift.
+        /// </summary>
         public Vector3 GetCurrentOffset()
         {
             return _cachedOffset + new Vector3(_driftOffset.x, 0f, _driftOffset.y);
@@ -212,7 +221,6 @@ namespace AIRefactored.AI.Groups
                 if (member != null && !member.IsDead && member.ProfileId == bot.ProfileId)
                     return i;
             }
-
             return -1;
         }
 

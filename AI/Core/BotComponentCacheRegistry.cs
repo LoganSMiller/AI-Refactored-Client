@@ -48,6 +48,7 @@ namespace AIRefactored.AI.Core
                     if (!PlayerMap.ContainsKey(player))
                         PlayerMap[player] = existing;
 
+                    // Attach owner if missing (guaranteed ready)
                     if (existing.AIRefactoredBotOwner == null)
                     {
                         var attachOwner = bot.GetComponent<AIRefactoredBotOwner>() ?? new AIRefactoredBotOwner();

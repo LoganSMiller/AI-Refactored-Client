@@ -72,6 +72,9 @@ namespace AIRefactored.AI.Missions
 
         #region Tick Logic
 
+        /// <summary>
+        /// Main per-tick extraction logic. Only executes safe, path-based moves; bulletproof error isolation.
+        /// </summary>
         public void Tick(float now)
         {
             if (_hasExtracted || !EFTPlayerUtil.IsValidBotOwner(_bot))
@@ -99,6 +102,9 @@ namespace AIRefactored.AI.Missions
 
         #region Decision Logic
 
+        /// <summary>
+        /// Returns true if this bot should extract at the current time. 
+        /// </summary>
         public bool ShouldExtract(float now)
         {
             try
@@ -155,6 +161,9 @@ namespace AIRefactored.AI.Missions
 
         #region Execution Logic
 
+        /// <summary>
+        /// Executes extraction movement using only safe, path-based logic. Marks extract state.
+        /// </summary>
         public void TriggerExtraction()
         {
             if (!EFTPlayerUtil.IsValidBotOwner(_bot)) return;
@@ -191,6 +200,9 @@ namespace AIRefactored.AI.Missions
 
         #region Private Helpers
 
+        /// <summary>
+        /// Returns true if the bot has not moved sufficiently within a given timeout (stuck detection).
+        /// </summary>
         private bool IsBotStuck(float now, float timeout)
         {
             Vector3 currentPos = EFTPlayerUtil.GetPosition(_bot);
@@ -207,6 +219,9 @@ namespace AIRefactored.AI.Missions
             return (now - _lastMoveUpdateTime) >= timeout;
         }
 
+        /// <summary>
+        /// Returns true if all squadmates are dead (wiped).
+        /// </summary>
         private bool HasSquadWiped()
         {
             BotsGroup group = _bot.BotsGroup;
@@ -221,6 +236,9 @@ namespace AIRefactored.AI.Missions
             return true;
         }
 
+        /// <summary>
+        /// Returns true if bot is outside of squad cohesion radius.
+        /// </summary>
         private bool IsBotIsolated(float radius)
         {
             BotsGroup group = _bot.BotsGroup;
@@ -242,6 +260,9 @@ namespace AIRefactored.AI.Missions
             return true;
         }
 
+        /// <summary>
+        /// Attempts to find a nearby, valid exfiltration point within range.
+        /// </summary>
         private bool TryFindNearbyExfil(out Vector3 exfil)
         {
             exfil = Vector3.zero;

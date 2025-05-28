@@ -418,5 +418,47 @@ namespace AIRefactored.AI.Groups
         }
 
         #endregion
+
+        #region Bounding Advance + Formation Overlay
+
+        /// <summary>
+        /// Returns true if this squad is in "bounding" advance overlay (for formation-aware pushes).
+        /// </summary>
+        public bool IsBoundingAdvanceActive
+        {
+            get
+            {
+                // AAA/Ultra-Platinum++: Allow any leader or squad member to bound if IsInSquad, fallback to IsLeader for legacy logic.
+                return IsInSquad && (IsLeader || _group.MembersCount >= 2);
+            }
+        }
+
+        /// <summary>
+        /// Returns a squad-formation-validated advance point for coordinated bounding/formation pushes.
+        /// </summary>
+        public Vector3 GetFormationAdvancePoint(BotOwner requester, Vector3 target)
+        {
+            if (_squadMembers == null || requester == null)
+                return target;
+
+            int index = _squadMembers.IndexOf(requester);
+            if (index < 0) index = 0;
+
+            float spread = MinSpacing + ((_squadMembers.Count - 1) * 0.7f);
+            Vector3 forward = (target - requester.Position).normalized;
+            if (forward.sqrMagnitude < 0.01f) forward = requester.LookDirection.normalized;
+            Vector3 perp = Vector3.Cross(Vector3.up, forward);
+            float offset = (index - (_squadMembers.Count / 2f)) * spread;
+
+            Vector3 formationPoint = target + perp * offset;
+
+            // Sample for NavMesh validation; fallback to direct target if sampling fails
+            if (!NavMesh.SamplePosition(formationPoint, out var hit, 1.5f, NavMesh.AllAreas))
+                return target;
+
+            return hit.position;
+        }
+
+        #endregion
     }
 }

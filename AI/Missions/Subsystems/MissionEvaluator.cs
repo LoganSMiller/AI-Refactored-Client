@@ -22,6 +22,10 @@ namespace AIRefactored.AI.Missions.Subsystems
     using UnityEngine;
     using UnityEngine.AI;
 
+    /// <summary>
+    /// Overlay-only mission intent logic: no per-frame movement, pooled, squad-aware, error-isolated.
+    /// All pooling strictly uses TempListPool. Fallbacks use only AIRefactored helpers, never disables.
+    /// </summary>
     public sealed class MissionEvaluator
     {
         #region Constants
@@ -65,12 +69,18 @@ namespace AIRefactored.AI.Missions.Subsystems
             _group = BotCacheUtility.GetGroupSync(cache);
             _lastPos = EFTPlayerUtil.GetPosition(bot);
             _lastMoveTime = Time.time;
+            _fallbackAttempts = 0;
+            _stuckSince = Time.time;
+            _lastStuckFallbackTime = -99f;
         }
 
         #endregion
 
         #region Intent Logic
 
+        /// <summary>
+        /// Returns overlay intent direction for movement overlays. Squad-aware. Never allocates.
+        /// </summary>
         public Vector3 GetCurrentIntentDirection()
         {
             if (!EFTPlayerUtil.IsValidBotOwner(_bot))
@@ -158,6 +168,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             }
         }
 
+        /// <summary>
+        /// Overlay/event-based extraction attempt. No tick, no direct position set.
+        /// </summary>
         public void TryExtract()
         {
             try
@@ -206,6 +219,10 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         #region Stuck Detection
 
+        /// <summary>
+        /// Overlay-only anti-stuck: triggers overlay fallback, never direct position set.
+        /// Bulletproof, pooled. All logic must be externally BotBrain-ticked.
+        /// </summary>
         public void UpdateStuckCheck(float time)
         {
             try

@@ -19,6 +19,10 @@ namespace AIRefactored.AI.Hotspots
     using UnityEngine;
     using UnityEngine.AI;
 
+    /// <summary>
+    /// Handles squad-aware hotspot patrol and defense for AI-Refactored bots.
+    /// Full tactical and personality awareness, error isolation, and BotBrain-safe overlays.
+    /// </summary>
     public sealed class HotspotSystem
     {
         private static readonly ManualLogSource Logger = Plugin.LoggerInstance;
@@ -157,6 +161,7 @@ namespace AIRefactored.AI.Hotspots
                 if (!EFTPlayerUtil.IsValidBotOwner(_bot) || _route.Count == 0 || _bot.GetPlayer.IsYourPlayer)
                     return;
 
+                // Skip movement if in combat or recently damaged
                 if (_bot.Memory?.GoalEnemy != null || Time.time - _lastHitTime < DamageCooldown)
                     return;
 

@@ -86,6 +86,9 @@ namespace AIRefactored.AI.Combat
 
         public bool IsSuppressed() => _isSuppressed;
 
+        /// <summary>
+        /// Suppression tick: composure decay, voice, clear suppression. Bulletproof: all errors isolated.
+        /// </summary>
         public void Tick(float time)
         {
             if (!_isSuppressed)
@@ -121,6 +124,9 @@ namespace AIRefactored.AI.Combat
             }
         }
 
+        /// <summary>
+        /// Triggers suppression (panic, retreat, voice, squad contagion, comms). Overlay/intent-only.
+        /// </summary>
         public void TriggerSuppression(Vector3? source)
         {
             if (_isSuppressed || !IsValid())
@@ -135,6 +141,7 @@ namespace AIRefactored.AI.Combat
                 _isSuppressed = true;
                 _suppressionStartTime = Time.time;
 
+                // Decay composure if possible (deep panic risk)
                 if (panic != null && _composureField != null)
                 {
                     float loss = UnityEngine.Random.Range(ComposureLossMin, ComposureLossMax);
@@ -142,6 +149,7 @@ namespace AIRefactored.AI.Combat
                     _composureField.SetValue(panic, Mathf.Clamp01(current - loss));
                 }
 
+                // Retreat direction overlay
                 Vector3 retreat = source.HasValue
                     ? (_bot.Position - source.Value).normalized
                     : GetDefaultRetreatDirection();
@@ -161,6 +169,7 @@ namespace AIRefactored.AI.Combat
                     BotCoverHelper.TrySetStanceFromNearbyCover(_cache, fallback);
                 }
 
+                // Panic escalation (contagion)
                 if (panic != null && panic.GetComposureLevel() < PanicComposureThreshold)
                     panic.TriggerPanic();
 
@@ -185,6 +194,9 @@ namespace AIRefactored.AI.Combat
 
         #region Squad Propagation
 
+        /// <summary>
+        /// Spreads suppression to nearby squadmates. Overlay-only, with emotional contagion chance.
+        /// </summary>
         private void TryPropagateSuppression()
         {
             try

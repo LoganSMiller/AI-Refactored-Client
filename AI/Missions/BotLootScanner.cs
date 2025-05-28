@@ -17,6 +17,10 @@ namespace AIRefactored.AI.Looting
     using EFT.InventoryLogic;
     using UnityEngine;
 
+    /// <summary>
+    /// Scans for loot containers, evaluates value, arbitrates squad loot, and surfaces loot positions.
+    /// 100% tick-driven, pooled, and squad-aware. No hot path allocation, no fallback disables.
+    /// </summary>
     public sealed class BotLootScanner
     {
         #region Fields
@@ -26,6 +30,7 @@ namespace AIRefactored.AI.Looting
 
         private readonly List<LootableContainer> _nearbyContainers = new List<LootableContainer>(16);
         private readonly List<Item> _tempItems = new List<Item>(32);
+
         private string _squadLootClaimId;
         private Vector3 _squadLootTarget;
         private float _squadLootClaimTime;
@@ -37,6 +42,9 @@ namespace AIRefactored.AI.Looting
 
         #region Initialization
 
+        /// <summary>
+        /// Initializes the scanner with the owning bot's cache.
+        /// </summary>
         public void Initialize(BotComponentCache cache)
         {
             _cache = cache;
@@ -51,6 +59,9 @@ namespace AIRefactored.AI.Looting
 
         #region BotBrain Tick Only
 
+        /// <summary>
+        /// Ticks scanning and loot arbitration logic. Only safe to call from BotBrain.
+        /// </summary>
         public void Tick(float deltaTime)
         {
             try
@@ -68,6 +79,9 @@ namespace AIRefactored.AI.Looting
 
         #region Squad Arbitration
 
+        /// <summary>
+        /// Registers a squad-shared loot claim at a world position.
+        /// </summary>
         public void RegisterSquadLootTarget(Vector3 worldPos)
         {
             float bestDist = 99f;
@@ -96,6 +110,9 @@ namespace AIRefactored.AI.Looting
             }
         }
 
+        /// <summary>
+        /// Returns the current squad-claimed loot ID, or null if expired.
+        /// </summary>
         public string GetSquadClaimedLootId()
         {
             if (_squadLootClaimId != null && (Time.time - _squadLootClaimTime) < 12f)
@@ -103,6 +120,9 @@ namespace AIRefactored.AI.Looting
             return null;
         }
 
+        /// <summary>
+        /// Returns the squad-claimed loot position if valid, else Vector3.zero.
+        /// </summary>
         public Vector3 GetSquadClaimedLootPosition()
         {
             if (!string.IsNullOrEmpty(_squadLootClaimId) && (Time.time - _squadLootClaimTime) < 12f)
@@ -114,6 +134,9 @@ namespace AIRefactored.AI.Looting
 
         #region Internal: Scanning/Evaluation
 
+        /// <summary>
+        /// Scans all loot containers within 22m, zero-allocation in hot path, populates _nearbyContainers.
+        /// </summary>
         private void ScanNearbyContainers()
         {
             _nearbyContainers.Clear();
@@ -135,6 +158,9 @@ namespace AIRefactored.AI.Looting
             }
         }
 
+        /// <summary>
+        /// Evaluates the best loot container for value and squad claim. Updates TotalLootValue and CurrentTargetContainer.
+        /// </summary>
         private void EvaluateBestLoot()
         {
             CurrentTargetContainer = null;
@@ -167,6 +193,9 @@ namespace AIRefactored.AI.Looting
             TotalLootValue = bestValue;
         }
 
+        /// <summary>
+        /// Estimates total value of a container, pooled/no allocation, zero disables.
+        /// </summary>
         private float EstimateValue(LootableContainer container)
         {
             if (container == null || container.ItemOwner == null || container.ItemOwner.RootItem == null)
@@ -188,6 +217,9 @@ namespace AIRefactored.AI.Looting
             return total;
         }
 
+        /// <summary>
+        /// Returns the best available loot point, or bot position if none found.
+        /// </summary>
         public Vector3 GetBestLootPoint()
         {
             if (CurrentTargetContainer != null && CurrentTargetContainer.transform != null)

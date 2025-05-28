@@ -18,6 +18,7 @@ namespace AIRefactored.AI.Looting
     /// <summary>
     /// Global registry for all lootable containers and loose items.
     /// Bulletproof: all failures are locally isolated; never breaks other systems.
+    /// All APIs are pooled, timestamped, and safe for multiplayer/headless/teardown.
     /// </summary>
     public static class LootRegistry
     {
@@ -82,6 +83,9 @@ namespace AIRefactored.AI.Looting
 
         #region Get APIs
 
+        /// <summary>
+        /// Gets all currently tracked containers. Returns a pooled list.
+        /// </summary>
         public static List<LootableContainer> GetAllContainers()
         {
             var list = TempListPool.Rent<LootableContainer>();
@@ -100,6 +104,9 @@ namespace AIRefactored.AI.Looting
             return list;
         }
 
+        /// <summary>
+        /// Gets all currently tracked loose items. Returns a pooled list.
+        /// </summary>
         public static List<LootItem> GetAllItems()
         {
             var list = TempListPool.Rent<LootItem>();
@@ -118,6 +125,9 @@ namespace AIRefactored.AI.Looting
             return list;
         }
 
+        /// <summary>
+        /// Gets all containers within a radius of origin. Returns a pooled list.
+        /// </summary>
         public static List<LootableContainer> GetNearbyContainers(Vector3 origin, float radius)
         {
             var list = TempListPool.Rent<LootableContainer>();
@@ -138,6 +148,9 @@ namespace AIRefactored.AI.Looting
             return list;
         }
 
+        /// <summary>
+        /// Gets all loose items within a radius of origin. Returns a pooled list.
+        /// </summary>
         public static List<LootItem> GetNearbyItems(Vector3 origin, float radius)
         {
             var list = TempListPool.Rent<LootItem>();
@@ -162,6 +175,9 @@ namespace AIRefactored.AI.Looting
 
         #region Lookup API
 
+        /// <summary>
+        /// Attempts to find a container by its Unity name.
+        /// </summary>
         public static bool TryGetContainerByName(string name, out LootableContainer container)
         {
             container = null;
@@ -186,6 +202,9 @@ namespace AIRefactored.AI.Looting
             return false;
         }
 
+        /// <summary>
+        /// Attempts to find an item by its Unity name.
+        /// </summary>
         public static bool TryGetItemByName(string name, out LootItem item)
         {
             item = null;
@@ -210,6 +229,9 @@ namespace AIRefactored.AI.Looting
             return false;
         }
 
+        /// <summary>
+        /// Gets the last-seen time for a container.
+        /// </summary>
         public static bool TryGetLastSeenTime(LootableContainer container, out float time)
         {
             time = 0f;
@@ -226,6 +248,9 @@ namespace AIRefactored.AI.Looting
             }
         }
 
+        /// <summary>
+        /// Gets the last-seen time for a loose item.
+        /// </summary>
         public static bool TryGetLastSeenTime(LootItem item, out float time)
         {
             time = 0f;
@@ -246,6 +271,9 @@ namespace AIRefactored.AI.Looting
 
         #region Registration
 
+        /// <summary>
+        /// Registers a new lootable container.
+        /// </summary>
         public static void RegisterContainer(LootableContainer container)
         {
             try
@@ -268,6 +296,9 @@ namespace AIRefactored.AI.Looting
             }
         }
 
+        /// <summary>
+        /// Registers a new loose loot item.
+        /// </summary>
         public static void RegisterItem(LootItem item)
         {
             try
@@ -294,6 +325,9 @@ namespace AIRefactored.AI.Looting
 
         #region Maintenance
 
+        /// <summary>
+        /// Removes all lootables/items not seen within the given time.
+        /// </summary>
         public static void PruneStale(float olderThanSeconds)
         {
             float cutoff = Time.time - olderThanSeconds;
@@ -311,7 +345,6 @@ namespace AIRefactored.AI.Looting
                     if (predicate(kv))
                         toRemove.Add(kv.Key);
                 }
-
                 for (int i = 0; i < toRemove.Count; i++)
                     dict.Remove(toRemove[i]);
             }

@@ -63,6 +63,9 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         #region Public API
 
+        /// <summary>
+        /// Sets initial mission objective and begins path-based movement.
+        /// </summary>
         public void SetInitialObjective(MissionType type)
         {
             try
@@ -78,6 +81,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             }
         }
 
+        /// <summary>
+        /// Handles logic after an objective is reached, issuing the next overlay move.
+        /// </summary>
         public void OnObjectiveReached(MissionType type)
         {
             try
@@ -93,6 +99,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             }
         }
 
+        /// <summary>
+        /// Resumes quest overlay routing after interruption.
+        /// </summary>
         public void ResumeQuesting()
         {
             try
@@ -118,6 +127,9 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         #region Routing Logic
 
+        /// <summary>
+        /// Issues path-based overlay movement toward the objective.
+        /// </summary>
         private void MoveToObjective(Vector3 dest)
         {
             if (!EFTPlayerUtil.IsValidBotOwner(_bot) || dest == Vector3.zero)
@@ -130,6 +142,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             }
         }
 
+        /// <summary>
+        /// Selects the current target for the mission overlay (quest, fight, loot, fallback: self).
+        /// </summary>
         private Vector3 GetObjectiveTarget(MissionType type)
         {
             switch (type)
@@ -145,6 +160,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             }
         }
 
+        /// <summary>
+        /// Returns a zone for fight overlays (randomized, NavMesh-validated).
+        /// </summary>
         private Vector3 GetFightZone()
         {
             try
@@ -163,6 +181,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             }
         }
 
+        /// <summary>
+        /// Returns the best loot point as determined by BotLootScanner.
+        /// </summary>
         private Vector3 GetLootObjective()
         {
             try
@@ -178,6 +199,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             }
         }
 
+        /// <summary>
+        /// Retrieves the next objective for quest overlay, filling route if needed.
+        /// </summary>
         private Vector3 GetNextQuestObjective()
         {
             if (_questRoute.Count > 0)
@@ -187,6 +211,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             return _questRoute.Count > 0 ? _questRoute.Dequeue() : EFTPlayerUtil.GetPosition(_bot);
         }
 
+        /// <summary>
+        /// Populates a quest overlay route based on nearby hotspots, direction, and pooling.
+        /// </summary>
         private void PopulateQuestRoute()
         {
             try
@@ -227,6 +254,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             }
         }
 
+        /// <summary>
+        /// Optionally notifies the squad of a new objective, anti-spam and deduped.
+        /// </summary>
         private void MaybeNotifySquadObjective(Vector3 obj, bool force = false)
         {
             var group = _cache.GroupBehavior;
@@ -238,7 +268,7 @@ namespace AIRefactored.AI.Missions.Subsystems
             {
                 _lastBroadcastedObjective = obj;
                 _lastBroadcastTime = now;
-                // Group comms/event can be issued here
+                // Add group comms/event logic here as needed.
             }
         }
 

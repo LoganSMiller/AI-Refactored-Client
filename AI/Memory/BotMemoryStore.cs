@@ -64,7 +64,10 @@ namespace AIRefactored.AI.Memory
                     cache = TempListPool.Rent<DangerZone>();
                     ZoneCaches[key] = cache;
                 }
-                else cache.Clear();
+                else
+                {
+                    cache.Clear();
+                }
 
                 float now = Time.time;
                 for (int i = 0; i < Zones.Count; i++)
@@ -113,7 +116,7 @@ namespace AIRefactored.AI.Memory
             {
                 Zones.Clear();
                 foreach (var kv in ZoneCaches)
-                    kv.Value.Clear();
+                    kv.Value?.Clear();
                 ZoneCaches.Clear();
             }
             catch (Exception ex)
@@ -166,7 +169,7 @@ namespace AIRefactored.AI.Memory
                 if (!TryGetSafeKey(profileId, out string key)) return;
 
                 HeardSounds.Remove(key);
-                if (ShortTermHeardSounds.TryGetValue(key, out var list))
+                if (ShortTermHeardSounds.TryGetValue(key, out var list) && list != null)
                     list.Clear();
             }
             catch (Exception ex)
@@ -181,7 +184,7 @@ namespace AIRefactored.AI.Memory
             {
                 HeardSounds.Clear();
                 foreach (var kv in ShortTermHeardSounds)
-                    kv.Value.Clear();
+                    kv.Value?.Clear();
             }
             catch (Exception ex)
             {

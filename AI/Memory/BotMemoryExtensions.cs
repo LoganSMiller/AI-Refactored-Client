@@ -8,18 +8,18 @@
 namespace AIRefactored.AI.Memory
 {
     using System;
-    using System.Collections.Generic;
     using AIRefactored.AI.Core;
     using AIRefactored.AI.Helpers;
-    using AIRefactored.AI.Navigation;
-    using AIRefactored.AI.Optimization;
     using AIRefactored.Core;
-    using AIRefactored.Pools;
     using BepInEx.Logging;
     using EFT;
     using UnityEngine;
     using UnityEngine.AI;
 
+    /// <summary>
+    /// Provides overlay/event-driven navigation and tactical memory helpers for bots.
+    /// Bulletproof: All moves are NavMesh-validated, pooled, intent-queued, event-only, and error-shielded.
+    /// </summary>
     public static class BotMemoryExtensions
     {
         private const float MinMoveThreshold = 0.5f;

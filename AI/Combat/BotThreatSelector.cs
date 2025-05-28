@@ -83,44 +83,51 @@ namespace AIRefactored.AI.Combat
 
             _nextEvalTime = time + EvaluateCooldown;
 
-            List<Player> players = GameWorldHandler.GetAllAlivePlayers();
-            if (players == null || players.Count == 0)
-                return;
-
-            Player best = null;
-            float bestScore = float.MinValue;
-
-            for (int i = 0; i < players.Count; i++)
+            try
             {
-                Player candidate = players[i];
-                if (!EFTPlayerUtil.IsValid(candidate) || !IsProperEnemy(_bot, candidate))
-                    continue;
+                List<Player> players = GameWorldHandler.GetAllAlivePlayers();
+                if (players == null || players.Count == 0)
+                    return;
 
-                float score = ScoreTarget(candidate, time);
-                if (score > bestScore)
+                Player best = null;
+                float bestScore = float.MinValue;
+
+                for (int i = 0; i < players.Count; i++)
                 {
-                    best = candidate;
-                    bestScore = score;
+                    Player candidate = players[i];
+                    if (!EFTPlayerUtil.IsValid(candidate) || !IsProperEnemy(_bot, candidate))
+                        continue;
+
+                    float score = ScoreTarget(candidate, time);
+                    if (score > bestScore)
+                    {
+                        best = candidate;
+                        bestScore = score;
+                    }
+                }
+
+                if (best == null)
+                {
+                    TryFallbackFromMemory(time);
+                    return;
+                }
+
+                if (_target == null)
+                {
+                    SetTarget(best, time);
+                    return;
+                }
+
+                float currentScore = ScoreTarget(_target, time);
+                float cooldown = SwitchCooldown * (1f - _profile.AggressionLevel);
+                if (bestScore > currentScore + SwitchThreshold && time > _lastSwitchTime + cooldown)
+                {
+                    SetTarget(best, time);
                 }
             }
-
-            if (best == null)
+            catch (Exception ex)
             {
-                TryFallbackFromMemory(time);
-                return;
-            }
-
-            if (_target == null)
-            {
-                SetTarget(best, time);
-                return;
-            }
-
-            float currentScore = ScoreTarget(_target, time);
-            float cooldown = SwitchCooldown * (1f - _profile.AggressionLevel);
-            if (bestScore > currentScore + SwitchThreshold && time > _lastSwitchTime + cooldown)
-            {
-                SetTarget(best, time);
+                _logger.LogError("[BotThreatSelector] Tick failed: " + ex);
             }
         }
 
@@ -130,59 +137,70 @@ namespace AIRefactored.AI.Combat
 
         private float ScoreTarget(Player candidate, float time)
         {
-            Vector3 pos = EFTPlayerUtil.GetPosition(candidate);
-            float dist = Vector3.Distance(_bot.Position, pos);
-            if (dist > MaxDistance) return float.MinValue;
-
-            float score = MaxDistance - dist;
-
-            if (dist < 12f)
-                score += CloseDistanceBonus;
-
-            if (_bot.BotsGroup != null)
+            try
             {
-                int count = _bot.BotsGroup.MembersCount;
-                for (int i = 0; i < count; i++)
+                Vector3 pos = EFTPlayerUtil.GetPosition(candidate);
+                float dist = Vector3.Distance(_bot.Position, pos);
+                if (dist > MaxDistance) return float.MinValue;
+
+                float score = MaxDistance - dist;
+
+                if (dist < 12f)
+                    score += CloseDistanceBonus;
+
+                // Squad assist bonus for focus fire
+                if (_bot.BotsGroup != null)
                 {
-                    BotOwner mate = _bot.BotsGroup.Member(i);
-                    if (mate != null && mate != _bot && !mate.IsDead &&
-                        mate.Memory?.GoalEnemy?.Person?.ProfileId == candidate.ProfileId)
+                    int count = _bot.BotsGroup.MembersCount;
+                    for (int i = 0; i < count; i++)
                     {
-                        score += SquadAssistBonus;
+                        BotOwner mate = _bot.BotsGroup.Member(i);
+                        if (mate != null && mate != _bot && !mate.IsDead &&
+                            mate.Memory?.GoalEnemy?.Person?.ProfileId == candidate.ProfileId)
+                        {
+                            score += SquadAssistBonus;
+                        }
                     }
                 }
-            }
 
-            EnemyInfo info = GetEnemyInfo(candidate);
-            if (info != null && info.IsVisible)
+                EnemyInfo info = GetEnemyInfo(candidate);
+                if (info != null && info.IsVisible)
+                {
+                    score += LineOfSightBonus;
+                    if (time - info.PersonalLastSeenTime < 2.4f)
+                        score += VisibleRecentBonus;
+                }
+
+                if (_cache.Suppression?.IsSuppressed() == true)
+                    score -= SuppressionPenalty;
+                if (_cache.PanicHandler?.IsPanicking == true)
+                    score -= PanicPenalty;
+
+                return score;
+            }
+            catch
             {
-                score += LineOfSightBonus;
-                if (time - info.PersonalLastSeenTime < 2.4f)
-                    score += VisibleRecentBonus;
+                return float.MinValue;
             }
-
-            if (_cache.Suppression?.IsSuppressed() == true)
-                score -= SuppressionPenalty;
-            if (_cache.PanicHandler?.IsPanicking == true)
-                score -= PanicPenalty;
-
-            return score;
         }
 
         private EnemyInfo GetEnemyInfo(Player player)
         {
-            if (_bot?.EnemiesController?.EnemyInfos == null || player == null)
-                return null;
-
-            foreach (var kv in _bot.EnemiesController.EnemyInfos)
+            try
             {
-                if (kv.Key is Player enemy && enemy.ProfileId == player.ProfileId)
-                    return kv.Value;
+                if (_bot?.EnemiesController?.EnemyInfos == null || player == null)
+                    return null;
+
+                foreach (var kv in _bot.EnemiesController.EnemyInfos)
+                {
+                    if (kv.Key is Player enemy && enemy.ProfileId == player.ProfileId)
+                        return kv.Value;
+                }
+
+                if (_bot.Memory?.GoalEnemy?.Person?.ProfileId == player.ProfileId)
+                    return _bot.Memory.GoalEnemy;
             }
-
-            if (_bot.Memory?.GoalEnemy?.Person?.ProfileId == player.ProfileId)
-                return _bot.Memory.GoalEnemy;
-
+            catch { }
             return null;
         }
 
@@ -192,13 +210,20 @@ namespace AIRefactored.AI.Combat
 
         private void TryFallbackFromMemory(float time)
         {
-            string id = _cache?.TacticalMemory?.GetMostRecentEnemyId();
-            if (string.IsNullOrEmpty(id))
-                return;
+            try
+            {
+                string id = _cache?.TacticalMemory?.GetMostRecentEnemyId();
+                if (string.IsNullOrEmpty(id))
+                    return;
 
-            Player fallback = EFTPlayerUtil.ResolvePlayerById(id);
-            if (EFTPlayerUtil.IsValid(fallback) && IsProperEnemy(_bot, fallback))
-                SetTarget(fallback, time);
+                Player fallback = EFTPlayerUtil.ResolvePlayerById(id);
+                if (EFTPlayerUtil.IsValid(fallback) && IsProperEnemy(_bot, fallback))
+                    SetTarget(fallback, time);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("[BotThreatSelector] FallbackFromMemory failed: " + ex);
+            }
         }
 
         private void SetTarget(Player player, float time)
@@ -206,13 +231,20 @@ namespace AIRefactored.AI.Combat
             _target = player;
             _lastSwitchTime = time;
 
-            if (_cache.TacticalMemory != null)
-                _cache.TacticalMemory.RecordEnemyPosition(EFTPlayerUtil.GetPosition(player), "Threat", player.ProfileId);
-
-            if (_cache.Movement != null && !_bot.Mover.IsMoving)
+            try
             {
-                if (BotNavHelper.TryGetSafeTarget(_bot, out Vector3 safePos) && IsVectorValid(safePos))
-                    BotMovementHelper.SmoothMoveToSafe(_bot, safePos, slow: false, cohesion: 1f);
+                if (_cache.TacticalMemory != null)
+                    _cache.TacticalMemory.RecordEnemyPosition(EFTPlayerUtil.GetPosition(player), "Threat", player.ProfileId);
+
+                if (_cache.Movement != null && !_bot.Mover.IsMoving)
+                {
+                    if (BotNavHelper.TryGetSafeTarget(_bot, out Vector3 safePos) && IsVectorValid(safePos))
+                        BotMovementHelper.SmoothMoveToSafe(_bot, safePos, slow: false, cohesion: 1f);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("[BotThreatSelector] SetTarget failed: " + ex);
             }
         }
 

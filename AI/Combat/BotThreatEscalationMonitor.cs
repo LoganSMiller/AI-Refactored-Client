@@ -20,6 +20,7 @@ namespace AIRefactored.AI.Combat
 
     /// <summary>
     /// Monitors, escalates, and communicates bot and squad threat level. All logic error-guarded and multiplayer-safe.
+    /// Overlay-only: No fallback, no disables, never triggers cascade, fully squad/personality aware.
     /// </summary>
     public sealed class BotThreatEscalationMonitor
     {

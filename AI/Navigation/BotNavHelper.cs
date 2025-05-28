@@ -12,6 +12,7 @@ namespace AIRefactored.AI.Navigation
     using UnityEngine;
     using UnityEngine.AI;
     using BepInEx.Logging;
+    using EFT.Interactive;
 
     /// <summary>
     /// Central helper for bulletproof EFT bot navigation and path state queries.
@@ -21,7 +22,11 @@ namespace AIRefactored.AI.Navigation
     {
         private static readonly ManualLogSource Logger = Plugin.LoggerInstance;
 
-        #region Core EFT Path Methods (No change)
+        #region Core EFT Path Methods
+
+        /// <summary>
+        /// Returns true and outputs a safe target (end of current path). Returns false if no path or invalid.
+        /// </summary>
         public static bool TryGetSafeTarget(BotOwner bot, out Vector3 target)
         {
             target = Vector3.zero;
@@ -38,10 +43,12 @@ namespace AIRefactored.AI.Navigation
                 }
             }
             catch { }
-
             return false;
         }
 
+        /// <summary>
+        /// Returns current path points up to maxPoints, or null if no path/invalid.
+        /// </summary>
         public static Vector3[] GetCurrentPathPoints(BotOwner bot, int maxPoints = 16)
         {
             if (!HasPath(bot))
@@ -52,18 +59,19 @@ namespace AIRefactored.AI.Navigation
                 Vector3[] points = bot.Mover._pathController.GetWayPoints(maxPoints);
                 if (points == null || points.Length == 0)
                     return null;
-
                 for (int i = 0; i < points.Length; i++)
                 {
                     if (!IsValid(points[i]) || points[i].y < -2.5f)
                         return null;
                 }
-
                 return points;
             }
             catch { return null; }
         }
 
+        /// <summary>
+        /// Outputs the next corner of the path, with micro-jitter. Returns false if unavailable.
+        /// </summary>
         public static bool TryGetCurrentCorner(BotOwner bot, out Vector3 corner)
         {
             corner = Vector3.zero;
@@ -75,7 +83,6 @@ namespace AIRefactored.AI.Navigation
                 Vector3 c = bot.Mover.CurrentCornerPoint;
                 if (!IsValid(c) || c.y < -2.5f)
                     return false;
-
                 const float jitter = 0.045f;
                 corner = c + new Vector3(
                     UnityEngine.Random.Range(-jitter, jitter),
@@ -87,6 +94,9 @@ namespace AIRefactored.AI.Navigation
             catch { return false; }
         }
 
+        /// <summary>
+        /// Returns remaining distance to destination along the path, or float.MaxValue if no path/invalid.
+        /// </summary>
         public static float GetRemainingDistance(BotOwner bot)
         {
             try
@@ -98,21 +108,29 @@ namespace AIRefactored.AI.Navigation
             catch { return float.MaxValue; }
         }
 
+        /// <summary>
+        /// Returns true if the provided point is on the current path within maxDist.
+        /// </summary>
         public static bool IsPointOnCurrentPath(BotOwner bot, Vector3 point, float maxDist)
         {
             return HasPath(bot) && bot.Mover.IsPointOnCurrentWay(point, maxDist);
         }
 
+        /// <summary>
+        /// True if bot has a valid, non-broken path (no NaN or invalid points).
+        /// </summary>
         public static bool HasPath(BotOwner bot)
         {
             return bot?.Mover != null && IsPathValid(bot.Mover._pathController);
         }
 
+        /// <summary>
+        /// Gets current path destination if available, or Vector3.zero if no path.
+        /// </summary>
         public static Vector3 GetCurrentDestination(BotOwner bot)
         {
             if (!HasPath(bot))
                 return Vector3.zero;
-
             try
             {
                 var tp = bot.Mover.TargetPoint;
@@ -122,6 +140,9 @@ namespace AIRefactored.AI.Navigation
             catch { return Vector3.zero; }
         }
 
+        /// <summary>
+        /// Returns nav state: Invalid, NoPath, Active, Blocked, or AtGoal.
+        /// </summary>
         public static BotNavState GetNavState(BotOwner bot)
         {
             if (bot == null || bot.Mover == null)
@@ -140,6 +161,9 @@ namespace AIRefactored.AI.Navigation
             return BotNavState.Active;
         }
 
+        /// <summary>
+        /// True if bot is within arrival threshold of current destination.
+        /// </summary>
         public static bool IsAtDestination(BotOwner bot)
         {
             if (!HasPath(bot))
@@ -149,10 +173,14 @@ namespace AIRefactored.AI.Navigation
             return dest != Vector3.zero && Vector3.Distance(bot.Position, dest) < 1.05f;
         }
 
+        /// <summary>
+        /// True if the bot's path is valid (all points safe for nav).
+        /// </summary>
         public static bool IsPathValid(BotOwner bot)
         {
             return bot?.Mover != null && IsPathValid(bot.Mover._pathController);
         }
+
         #endregion
 
         #region Movement & NavMesh Safe Helpers
@@ -207,6 +235,9 @@ namespace AIRefactored.AI.Navigation
 
         #region Misc Helpers
 
+        /// <summary>
+        /// Returns a realistic group formation target point.
+        /// </summary>
         public static Vector3 GetGroupFormationTarget(BotOwner self, BotOwner leader, float weight, float spacing)
         {
             if (self == null || leader == null)
@@ -225,9 +256,36 @@ namespace AIRefactored.AI.Navigation
 
         public static bool IsBlockedByClosedDoor(Vector3 from, Vector3 to)
         {
-            return false; // Placeholder for real door/obstacle logic.
+            // Only cast on the door layer.
+            Vector3 dir = to - from;
+            float dist = dir.magnitude;
+            if (dist < 0.01f)
+                return false;
+
+            dir /= dist; // Normalize
+
+            // Use LayerMaskClass.DoorLayer for exact match.
+            int doorLayerMask = 1 << LayerMaskClass.DoorLayer;
+
+            // Raycast for any door collider between from and to.
+            if (Physics.SphereCast(from + Vector3.up * 1.1f, 0.4f, dir, out RaycastHit hit, dist, doorLayerMask))
+            {
+                Door door = hit.collider.GetComponentInParent<Door>();
+                if (door != null && door.enabled && door.Operatable)
+                {
+                    EDoorState state = door.DoorState;
+                    // If the door is closed (not open or breaching), treat as blocking.
+                    if ((state & EDoorState.Open) == 0)
+                        return true;
+                }
+            }
+
+            return false;
         }
 
+        /// <summary>
+        /// Returns true if a position is valid and on the navmesh.
+        /// </summary>
         public static bool IsNavMeshPositionValid(Vector3 pos)
         {
             return IsValid(pos) && pos.y > -2.5f;

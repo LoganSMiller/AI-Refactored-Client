@@ -58,6 +58,7 @@ namespace AIRefactored.AI.Missions.Subsystems
             _group = BotCacheUtility.GetGroupSync(cache);
             _lootDecision = cache.LootDecisionSystem;
             _log = Plugin.LoggerInstance;
+            _lastSwitchTime = -99f;
         }
 
         #endregion

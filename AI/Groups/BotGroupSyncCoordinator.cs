@@ -192,6 +192,9 @@ namespace AIRefactored.AI.Groups
 
         public bool IsSquadReady() => _teammateCaches.Count > 0;
 
+        /// <summary>
+        /// Returns a pooled list. Caller must return it to TempListPool.
+        /// </summary>
         public IReadOnlyList<BotOwner> GetTeammates()
         {
             var result = TempListPool.Rent<BotOwner>();

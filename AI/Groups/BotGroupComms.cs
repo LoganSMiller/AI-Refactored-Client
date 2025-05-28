@@ -76,31 +76,64 @@ namespace AIRefactored.AI.Groups
 
         #region Public Voice Triggers
 
-        public void Say(EPhraseTrigger phrase) => TryTriggerVoice(phrase, 1f, false);
+        public void Say(EPhraseTrigger phrase) => TrySay(phrase, 1f, false);
 
-        public void SayFallback() => TryTriggerVoice(EPhraseTrigger.GetBack, 0.61f, true);
+        public void SayFallback() => TrySay(EPhraseTrigger.GetBack, 0.61f, true);
 
-        public void SayFragOut() => TryTriggerVoice(EPhraseTrigger.OnEnemyGrenade, HasNearbyAlly() ? 0.82f : 0.0f, true);
+        public void SayFragOut() => TrySay(EPhraseTrigger.OnEnemyGrenade, HasNearbyAlly() ? 0.82f : 0.0f, true);
 
-        public void SayHit() => TryTriggerVoice(EPhraseTrigger.OnBeingHurt, UnityEngine.Random.Range(0.66f, 0.87f), true);
+        public void SayHit() => TrySay(EPhraseTrigger.OnBeingHurt, UnityEngine.Random.Range(0.66f, 0.87f), true);
 
-        public void SaySuppression() => TryTriggerVoice(EPhraseTrigger.Suppress, 0.69f, true);
+        public void SaySuppression() => TrySay(EPhraseTrigger.Suppress, 0.69f, true);
 
-        public void SayLootRequest() => TryTriggerVoice(EPhraseTrigger.GoLoot, 0.93f, true);
+        public void SayLootRequest() => TrySay(EPhraseTrigger.GoLoot, 0.93f, true);
 
-        public void SayScanArea() => TryTriggerVoice(EPhraseTrigger.Look, 0.86f, true);
+        public void SayScanArea() => TrySay(EPhraseTrigger.Look, 0.86f, true);
 
-        public void SayLootMove() => TryTriggerVoice(EPhraseTrigger.OnPosition, 0.82f, true);
+        public void SayLootMove() => TrySay(EPhraseTrigger.OnPosition, 0.82f, true);
 
-        public void SayLootOpen() => TryTriggerVoice(EPhraseTrigger.OnLoot, 0.79f, true);
+        public void SayLootOpen() => TrySay(EPhraseTrigger.OnLoot, 0.79f, true);
 
-        public void SayLootSearch() => TryTriggerVoice(EPhraseTrigger.LootGeneric, 0.74f, true);
+        public void SayLootSearch() => TrySay(EPhraseTrigger.LootGeneric, 0.74f, true);
 
-        public void SayLootTake() => TryTriggerVoice(EPhraseTrigger.LootContainer, 0.86f, true);
+        public void SayLootTake() => TrySay(EPhraseTrigger.LootContainer, 0.86f, true);
 
-        public void SayLootDone() => TryTriggerVoice(EPhraseTrigger.GoodWork, 0.64f, true);
+        public void SayLootDone() => TrySay(EPhraseTrigger.GoodWork, 0.64f, true);
 
-        public void SayLootGiveUp() => TryTriggerVoice(EPhraseTrigger.LootNothing, 0.81f, true);
+        public void SayLootGiveUp() => TrySay(EPhraseTrigger.LootNothing, 0.81f, true);
+
+        /// <summary>
+        /// Universal squad-safe, anti-echo, comms-probability voice trigger. Used for all general-purpose voice logic.
+        /// Returns true if a phrase was spoken.
+        /// </summary>
+        public bool TrySay(EPhraseTrigger phrase, float chance = 1.0f, bool groupComms = true)
+        {
+            if (!IsEligible()) return false;
+
+            float now = Time.time;
+            if (now < _nextLocalVoiceTime) return false;
+            if (groupComms && _lastCommsPhrase == phrase.ToString() && now - _lastCommsTime < GroupEchoCooldown)
+                return false;
+            if (chance < 1f && UnityEngine.Random.value > chance)
+                return false;
+
+            _nextLocalVoiceTime = now + UnityEngine.Random.Range(VoiceCooldownMin, VoiceCooldownMax);
+            try
+            {
+                _bot.BotTalk.TrySay(phrase);
+                if (groupComms)
+                {
+                    _lastCommsPhrase = phrase.ToString();
+                    _lastCommsTime = now;
+                }
+                return true;
+            }
+            catch
+            {
+                IsMuted = true;
+                return false;
+            }
+        }
 
         #endregion
 
@@ -120,35 +153,6 @@ namespace AIRefactored.AI.Groups
         #endregion
 
         #region Internal
-
-        private void TryTriggerVoice(EPhraseTrigger phrase, float chance, bool groupComms)
-        {
-            if (!IsEligible()) return;
-
-            float now = Time.time;
-            if (now < _nextLocalVoiceTime) return;
-
-            if (groupComms && _lastCommsPhrase == phrase.ToString() && now - _lastCommsTime < GroupEchoCooldown)
-                return;
-
-            if (chance < 1f && UnityEngine.Random.value > chance)
-                return;
-
-            _nextLocalVoiceTime = now + UnityEngine.Random.Range(VoiceCooldownMin, VoiceCooldownMax);
-            try
-            {
-                _bot.BotTalk.TrySay(phrase);
-                if (groupComms)
-                {
-                    _lastCommsPhrase = phrase.ToString();
-                    _lastCommsTime = now;
-                }
-            }
-            catch
-            {
-                IsMuted = true;
-            }
-        }
 
         private bool IsEligible()
         {

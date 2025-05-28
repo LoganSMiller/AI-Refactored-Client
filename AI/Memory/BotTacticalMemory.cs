@@ -69,7 +69,7 @@ namespace AIRefactored.AI.Memory
         }
 
         /// <summary>
-        /// Cleans up expired enemy memory records (BotBrain-driven).
+        /// Cleans up expired enemy memory records (BotBrain-driven, pooled).
         /// </summary>
         private void CullExpired()
         {
@@ -98,7 +98,7 @@ namespace AIRefactored.AI.Memory
         }
 
         /// <summary>
-        /// Cleans up expired cleared zones (BotBrain-driven).
+        /// Cleans up expired cleared zones (BotBrain-driven, pooled).
         /// </summary>
         private void CullClearedZones()
         {
@@ -238,6 +238,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Returns all enemy memory records (exposed for pooled use).
+        /// </summary>
         public List<SeenEnemyRecord> GetAllMemory()
         {
             return _enemyMemoryList;
@@ -303,6 +306,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Returns true if any enemy or recent clear exists at this position.
+        /// </summary>
         public bool IsZoneUnsafe(Vector3 position)
         {
             try
@@ -349,6 +355,9 @@ namespace AIRefactored.AI.Memory
 
         #region Utilities
 
+        /// <summary>
+        /// Snaps a position to grid (prevents memory spam and floating point drift).
+        /// </summary>
         private static Vector3 SnapToGrid(Vector3 pos)
         {
             return new Vector3(

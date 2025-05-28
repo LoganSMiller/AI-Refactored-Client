@@ -102,6 +102,9 @@ namespace AIRefactored.AI.Missions
 
         #region Tick Logic
 
+        /// <summary>
+        /// All mission/logic is driven via BotBrain. No self-tick.
+        /// </summary>
         public void Tick(float time)
         {
             try
@@ -183,6 +186,9 @@ namespace AIRefactored.AI.Missions
 
         #region Mission Control & Callbacks
 
+        /// <summary>
+        /// Forces a mission type, disabling auto-switching.
+        /// </summary>
         public void SetForcedMission(MissionType mission)
         {
             try
