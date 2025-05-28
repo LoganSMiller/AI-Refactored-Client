@@ -136,7 +136,9 @@ namespace AIRefactored.AI.Missions
                     if (BotNavHelper.TryGetSafeTarget(_bot, out Vector3 retryTarget) &&
                         BotNavHelper.IsNavMeshPositionValid(retryTarget))
                     {
-                        BotMovementHelper.SmoothMoveTo(_bot, retryTarget, slow: true);
+                        var drifted = BotMovementHelper.ApplyMicroDrift(retryTarget, _bot.ProfileId, Time.frameCount, _profile);
+                        if (BotMovementHelper.ShouldMove(_bot, drifted))
+                            BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: 1f);
                     }
                 }
 
@@ -160,18 +162,22 @@ namespace AIRefactored.AI.Missions
             try
             {
                 _cache?.TacticalMemory?.MarkForcedExtract();
-
                 Vector3 exfilTarget;
+
                 if (TryFindNearbyExfil(out exfilTarget) && BotNavHelper.IsNavMeshPositionValid(exfilTarget))
                 {
-                    BotMovementHelper.SmoothMoveToSafeExit(_bot, exfilTarget);
+                    var drifted = BotMovementHelper.ApplyMicroDrift(exfilTarget, _bot.ProfileId, Time.frameCount, _profile);
+                    if (BotMovementHelper.ShouldMove(_bot, drifted))
+                        BotMovementHelper.SmoothMoveToSafeExit(_bot, drifted, slow: true, cohesion: 1f);
                     _cache?.TacticalMemory?.MarkForcedExtract();
                     return;
                 }
 
                 if (BotNavHelper.TryGetSafeTarget(_bot, out Vector3 fallback) && BotNavHelper.IsNavMeshPositionValid(fallback))
                 {
-                    BotMovementHelper.SmoothMoveToSafeExit(_bot, fallback);
+                    var drifted = BotMovementHelper.ApplyMicroDrift(fallback, _bot.ProfileId, Time.frameCount, _profile);
+                    if (BotMovementHelper.ShouldMove(_bot, drifted))
+                        BotMovementHelper.SmoothMoveToSafeExit(_bot, drifted, slow: true, cohesion: 1f);
                     _cache?.TacticalMemory?.MarkForcedExtract();
                 }
             }

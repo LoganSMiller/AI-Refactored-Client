@@ -75,6 +75,9 @@ namespace AIRefactored.AI.Navigation
 
         #region Public API
 
+        /// <summary>
+        /// Must be ticked from BotBrain only.
+        /// </summary>
         public void Tick(float time)
         {
             try
@@ -185,7 +188,6 @@ namespace AIRefactored.AI.Navigation
                 {
                     EInteractionType interactionType = GetBestInteractionType(state);
                     player.CurrentManagedState.StartDoorInteraction(door, new InteractionResult(interactionType), null);
-                    _log.LogDebug($"[BotDoorInteraction] {player.ProfileId} → {interactionType} door {door.name}");
                 }
                 catch (Exception ex)
                 {

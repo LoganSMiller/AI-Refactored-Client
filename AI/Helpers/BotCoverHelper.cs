@@ -97,8 +97,7 @@ namespace AIRefactored.AI.Helpers
         #region Pose Assignment Logic
 
         /// <summary>
-        /// Uses nearby cover point to assign bot pose realistically.
-        /// Never disables. Safe in headless or multiplayer.
+        /// Uses the closest valid cover point to set stance realistically. Fully safe for multiplayer/headless.
         /// </summary>
         public static void TrySetStanceFromNearbyCover(BotComponentCache cache, Vector3 position)
         {
@@ -135,13 +134,11 @@ namespace AIRefactored.AI.Helpers
                         cache.PoseController.SetProne(true);
                         return;
                     }
-
                     if (IsLowCover(best))
                     {
                         cache.PoseController.SetCrouch(true);
                         return;
                     }
-
                     if (IsStandingCover(best))
                     {
                         cache.PoseController.SetProne(false);
@@ -157,8 +154,8 @@ namespace AIRefactored.AI.Helpers
         #region Tactical Cover Scoring
 
         /// <summary>
-        /// Scores a cover point for fallback/retreat/attack use.
-        /// Includes threat angle, posture bonus, memory penalty, and distance.
+        /// Scores a cover point for fallback/retreat/attack. 
+        /// Takes posture, threat angle, memory, and distance into account. Bulletproof and atomic.
         /// </summary>
         public static float Score(CustomNavigationPoint point, Vector3 botPos, Vector3 threatPos)
         {
@@ -194,7 +191,7 @@ namespace AIRefactored.AI.Helpers
         #region Cover Validation
 
         /// <summary>
-        /// Validates a cover point for tactical fallback use. Multiplayer-safe and stance-aware.
+        /// Validates a cover point for tactical fallback or use. All context/stance and multiplayer-safe.
         /// </summary>
         public static bool IsValidCoverPoint(CustomNavigationPoint point, BotOwner bot, bool requireFree, bool preferIndoor)
         {

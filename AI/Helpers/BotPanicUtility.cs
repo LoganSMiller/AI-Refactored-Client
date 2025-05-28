@@ -117,6 +117,9 @@ namespace AIRefactored.AI.Helpers
 
         #region Internal Helpers
 
+        /// <summary>
+        /// Returns true if the bot is eligible for panic triggering.
+        /// </summary>
         private static bool IsEligible(BotComponentCache cache)
         {
             return cache != null &&
@@ -126,6 +129,9 @@ namespace AIRefactored.AI.Helpers
                    !cache.PanicHandler.IsPanicking;
         }
 
+        /// <summary>
+        /// Returns a composure/personality-based panic propagation jitter in seconds.
+        /// </summary>
         private static float GetPanicJitter(string profileId, int order)
         {
             int hash = (profileId?.GetHashCode() ?? 0) ^ (order * 37) ^ 0x5E1F1213;
@@ -137,6 +143,9 @@ namespace AIRefactored.AI.Helpers
             }
         }
 
+        /// <summary>
+        /// Triggers panic on a bot after a composure/personality-based delay, using a pooled background task.
+        /// </summary>
         private static void TriggerDelayedPanic(BotComponentCache cache, float delay)
         {
             if (cache == null)

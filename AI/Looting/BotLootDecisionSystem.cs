@@ -18,10 +18,6 @@ namespace AIRefactored.AI.Looting
     using EFT.InventoryLogic;
     using UnityEngine;
 
-    /// <summary>
-    /// Fully humanized looting system: greed, impatience, squad arbitration, memory, and voice integration.
-    /// 100% managed via BotBrain. No self-tick, no fallback AI, no vanilla overrides.
-    /// </summary>
     public sealed class BotLootDecisionSystem
     {
         #region Constants

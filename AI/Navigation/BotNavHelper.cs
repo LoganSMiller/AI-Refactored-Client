@@ -10,6 +10,7 @@ namespace AIRefactored.AI.Navigation
 {
     using EFT;
     using UnityEngine;
+    using UnityEngine.AI;
     using BepInEx.Logging;
 
     /// <summary>
@@ -20,7 +21,8 @@ namespace AIRefactored.AI.Navigation
     {
         private static readonly ManualLogSource Logger = Plugin.LoggerInstance;
 
-        public static bool TryGetSafeTarget(BotOwner bot, out Vector3 target) 
+        #region Core EFT Path Methods (No change)
+        public static bool TryGetSafeTarget(BotOwner bot, out Vector3 target)
         {
             target = Vector3.zero;
             if (!HasPath(bot))
@@ -151,6 +153,59 @@ namespace AIRefactored.AI.Navigation
         {
             return bot?.Mover != null && IsPathValid(bot.Mover._pathController);
         }
+        #endregion
+
+        #region Movement & NavMesh Safe Helpers
+
+        /// <summary>
+        /// Returns true and outputs a NavMesh-safe version of 'candidate' if it's valid. Always clamps Y.
+        /// </summary>
+        public static bool TryGetNavMeshSafePosition(Vector3 candidate, Vector3 origin, out Vector3 navSafe, float radius = 1.5f)
+        {
+            navSafe = candidate;
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, radius, NavMesh.AllAreas))
+            {
+                navSafe = ClampY(hit.position, origin);
+                return IsValid(navSafe);
+            }
+            navSafe = ClampY(candidate, origin);
+            return IsValid(navSafe);
+        }
+
+        /// <summary>
+        /// Returns a NavMesh-safe version of 'candidate', or origin if invalid.
+        /// </summary>
+        public static Vector3 GetNavMeshSafePosition(Vector3 candidate, Vector3 origin, float radius = 1.5f)
+        {
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, radius, NavMesh.AllAreas))
+                return ClampY(hit.position, origin);
+            return ClampY(origin, origin);
+        }
+
+        /// <summary>
+        /// Y-clamps a Vector3 to basePos for sanity.
+        /// </summary>
+        public static Vector3 ClampY(Vector3 v, Vector3 basePos)
+        {
+            if (Mathf.Abs(v.y - basePos.y) > 3f || v.y < -2.5f)
+                v.y = basePos.y;
+            return v;
+        }
+
+        /// <summary>
+        /// Returns true if the Vector3 is valid for pathing.
+        /// </summary>
+        public static bool IsValid(Vector3 pt)
+        {
+            return !float.IsNaN(pt.x) && !float.IsNaN(pt.y) && !float.IsNaN(pt.z) &&
+                   !float.IsInfinity(pt.x) && !float.IsInfinity(pt.y) && !float.IsInfinity(pt.z) &&
+                   Mathf.Abs(pt.x) < 10000f && Mathf.Abs(pt.y) < 10000f && Mathf.Abs(pt.z) < 10000f &&
+                   pt != Vector3.zero;
+        }
+
+        #endregion
+
+        #region Misc Helpers
 
         public static Vector3 GetGroupFormationTarget(BotOwner self, BotOwner leader, float weight, float spacing)
         {
@@ -170,7 +225,7 @@ namespace AIRefactored.AI.Navigation
 
         public static bool IsBlockedByClosedDoor(Vector3 from, Vector3 to)
         {
-            return false; // Placeholder for future real door raycast logic.
+            return false; // Placeholder for real door/obstacle logic.
         }
 
         public static bool IsNavMeshPositionValid(Vector3 pos)
@@ -178,19 +233,16 @@ namespace AIRefactored.AI.Navigation
             return IsValid(pos) && pos.y > -2.5f;
         }
 
+        #endregion
+
+        #region Internal
+
         private static bool IsPathValid(PathControllerClass pc)
         {
             return pc != null &&
                    pc.HavePath &&
                    pc.CurPath != null &&
                    pc.CurPath.Length > 0;
-        }
-
-        private static bool IsValid(Vector3 pt)
-        {
-            return !float.IsNaN(pt.x) && !float.IsNaN(pt.y) && !float.IsNaN(pt.z) &&
-                   !float.IsInfinity(pt.x) && !float.IsInfinity(pt.y) && !float.IsInfinity(pt.z) &&
-                   Mathf.Abs(pt.x) < 10000f && Mathf.Abs(pt.y) < 10000f && Mathf.Abs(pt.z) < 10000f;
         }
 
         public enum BotNavState
@@ -201,5 +253,7 @@ namespace AIRefactored.AI.Navigation
             Blocked,
             AtGoal
         }
+
+        #endregion
     }
 }

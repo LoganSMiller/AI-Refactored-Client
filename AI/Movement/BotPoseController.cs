@@ -18,7 +18,7 @@ namespace AIRefactored.AI.Movement
 
     /// <summary>
     /// Handles all stance and pose transitions for bots: standing, crouch, prone, anticipation, and squad logic.
-    /// Fully atomic, error-isolated, and context aware (panic, squad stack, suppression, cover, memory, personality).
+    /// Fully atomic, error-isolated, context-aware (panic, squad, suppression, cover, memory, personality).
     /// 100% BotBrain driven. No disables, no fallback. All failures contained.
     /// </summary>
     public sealed class BotPoseController
@@ -61,12 +61,18 @@ namespace AIRefactored.AI.Movement
 
         #region Constructor
 
+        /// <summary>
+        /// Fully atomic pose controller for a bot. Throws if bot/context is missing.
+        /// </summary>
         public BotPoseController(BotOwner bot, BotComponentCache cache)
         {
-            if (!EFTPlayerUtil.IsValidBotOwner(bot)) throw new ArgumentException("[BotPoseController] Invalid bot.");
-            if (cache == null || cache.PersonalityProfile == null) throw new ArgumentException("[BotPoseController] Cache/personality is null.");
+            if (!EFTPlayerUtil.IsValidBotOwner(bot))
+                throw new ArgumentException("[BotPoseController] Invalid bot.");
+            if (cache == null || cache.PersonalityProfile == null)
+                throw new ArgumentException("[BotPoseController] Cache/personality is null.");
             MovementContext movement = bot.GetPlayer?.MovementContext;
-            if (movement == null) throw new ArgumentException("[BotPoseController] Missing MovementContext.");
+            if (movement == null)
+                throw new ArgumentException("[BotPoseController] Missing MovementContext.");
 
             _bot = bot;
             _cache = cache;
@@ -86,10 +92,10 @@ namespace AIRefactored.AI.Movement
 
         #region Public API
 
-        /// <summary>Current bot pose value.</summary>
+        /// <summary>Returns the current pose level (stand, crouch, prone) for this bot.</summary>
         public float GetPoseLevel() => _movement?.PoseLevel ?? StandPose;
 
-        /// <summary>Lock bot into crouch until unlock.</summary>
+        /// <summary>Lock bot into crouch until unlocked (e.g., for scripted cover stack or suppression).</summary>
         public void LockCrouchPose()
         {
             _targetPoseLevel = CrouchPose;
@@ -98,7 +104,7 @@ namespace AIRefactored.AI.Movement
             _anticipateOffset = 0f;
         }
 
-        /// <summary>Unlock any pose lock (stand/crouch/prone).</summary>
+        /// <summary>Unlock pose lock (restores autonomous pose logic).</summary>
         public void UnlockPose()
         {
             _isLocked = false;
@@ -106,13 +112,13 @@ namespace AIRefactored.AI.Movement
             _anticipateOffset = 0f;
         }
 
-        /// <summary>Standard crouch call.</summary>
+        /// <summary>Request crouch. Optional anticipation micro-jitter.</summary>
         public void Crouch() => SetCrouch(false);
 
-        /// <summary>Standard stand call.</summary>
+        /// <summary>Request stand (full height).</summary>
         public void Stand() => SetStand();
 
-        /// <summary>Set pose to crouch (with optional anticipation/jitter).</summary>
+        /// <summary>Request crouch with optional anticipation.</summary>
         public void SetCrouch(bool anticipate = false)
         {
             _targetPoseLevel = anticipate
@@ -121,7 +127,7 @@ namespace AIRefactored.AI.Movement
             if (anticipate) StartAnticipation();
         }
 
-        /// <summary>Set pose to prone (with optional anticipation/jitter).</summary>
+        /// <summary>Request prone with optional anticipation.</summary>
         public void SetProne(bool anticipate = false)
         {
             _targetPoseLevel = anticipate
@@ -130,7 +136,7 @@ namespace AIRefactored.AI.Movement
             if (anticipate) StartAnticipation();
         }
 
-        /// <summary>Set pose to standing.</summary>
+        /// <summary>Set pose to standing (resets anticipation).</summary>
         public void SetStand()
         {
             _targetPoseLevel = StandPose;
@@ -138,7 +144,7 @@ namespace AIRefactored.AI.Movement
             _anticipateOffset = 0f;
         }
 
-        /// <summary>Main Tick (BotBrain driven).</summary>
+        /// <summary>Main overlay tick. Only called by BotBrain (no timers/coroutines).</summary>
         public void Tick(float currentTime)
         {
             try
@@ -176,7 +182,7 @@ namespace AIRefactored.AI.Movement
             catch { }
         }
 
-        /// <summary>Evaluates stance based on cover type and position (cover-aware).</summary>
+        /// <summary>Cover-aware: sets stance based on nearby cover info (prone/crouch for low/high cover).</summary>
         public void TrySetStanceFromNearbyCover(Vector3 position)
         {
             try
@@ -198,6 +204,9 @@ namespace AIRefactored.AI.Movement
 
         #region Internal Logic
 
+        /// <summary>
+        /// Smoothly blends the bot's current pose toward the target pose at context-sensitive speed.
+        /// </summary>
         private void BlendPose(float deltaTime)
         {
             if (Mathf.Abs(_currentPoseLevel - _targetPoseLevel) < MinPoseThreshold) return;
@@ -211,6 +220,9 @@ namespace AIRefactored.AI.Movement
             _movement.SetPoseLevel(_currentPoseLevel);
         }
 
+        /// <summary>
+        /// Evaluates pose intent based on personality, context, squad, and environmental factors.
+        /// </summary>
         private void EvaluatePoseIntent(float now)
         {
             try
@@ -279,6 +291,9 @@ namespace AIRefactored.AI.Movement
             catch { }
         }
 
+        /// <summary>
+        /// Squad stack detection (2+ bots within close radius triggers crouch overlay).
+        /// </summary>
         private bool IsSquadStacked()
         {
             try
@@ -298,6 +313,9 @@ namespace AIRefactored.AI.Movement
             catch { return false; }
         }
 
+        /// <summary>
+        /// Begins anticipation overlay (micro-delay, jittered pose offset).
+        /// </summary>
         private void StartAnticipation()
         {
             _anticipateNext = true;

@@ -163,7 +163,6 @@ namespace AIRefactored.AI.Combat
             if (NeedsFallbackNow(now))
             {
                 AssignFallbackIfNeeded(now);
-                // Fallback movement is always handled by FallbackHandler (which uses BotMovementHelper internally)
                 _fallback.Tick(0f, now, SetLastStateChangeTime);
                 return;
             }
@@ -205,7 +204,6 @@ namespace AIRefactored.AI.Combat
                 return;
             }
 
-            // Patrol always uses SmoothMoveToSafe and never direct move.
             _patrol?.Tick(now);
         }
 
@@ -253,7 +251,6 @@ namespace AIRefactored.AI.Combat
             var path = TempListPool.Rent<Vector3>();
             path.Clear(); path.Add(_bot.Position); path.Add(fallback);
 
-            // All movement is handled via FallbackHandler (which uses BotMovementHelper).
             _fallback.SetFallbackPath(path, now);
             _fallback.SetFallbackTarget(fallback, now);
             TrySetStanceFromNearbyCover(fallback);

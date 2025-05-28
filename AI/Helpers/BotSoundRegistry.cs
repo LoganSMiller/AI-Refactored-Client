@@ -40,6 +40,9 @@ namespace AIRefactored.AI.Helpers
 
         #region Public API
 
+        /// <summary>
+        /// Clears all sound/event data (full reset, e.g. at raid end).
+        /// </summary>
         public static void Clear()
         {
             FootstepTimestamps.Clear();
@@ -47,18 +50,27 @@ namespace AIRefactored.AI.Helpers
             SoundZones.Clear();
         }
 
+        /// <summary>
+        /// Returns true if player fired recently (within seconds window).
+        /// </summary>
         public static bool FiredRecently(Player player, float withinSeconds = 1.5f, float now = -1f)
         {
             return TryGetLastShot(player, out float time) &&
                    ((now >= 0f ? now : Time.time) - time <= withinSeconds);
         }
 
+        /// <summary>
+        /// Returns true if player stepped recently (within seconds window).
+        /// </summary>
         public static bool SteppedRecently(Player player, float withinSeconds = 1.2f, float now = -1f)
         {
             return TryGetLastStep(player, out float time) &&
                    ((now >= 0f ? now : Time.time) - time <= withinSeconds);
         }
 
+        /// <summary>
+        /// Notifies that player fired a shot (event-driven, never ticked).
+        /// </summary>
         public static void NotifyShot(Player player)
         {
             try
@@ -98,6 +110,9 @@ namespace AIRefactored.AI.Helpers
             }
         }
 
+        /// <summary>
+        /// Notifies that player stepped (event-driven, never ticked).
+        /// </summary>
         public static void NotifyStep(Player player)
         {
             try
@@ -137,6 +152,9 @@ namespace AIRefactored.AI.Helpers
             }
         }
 
+        /// <summary>
+        /// Returns true if we know the last shot time for a player.
+        /// </summary>
         public static bool TryGetLastShot(Player player, out float time)
         {
             time = -1f;
@@ -144,6 +162,9 @@ namespace AIRefactored.AI.Helpers
             return ShotTimestamps.TryGetValue(player.ProfileId, out time);
         }
 
+        /// <summary>
+        /// Returns true if we know the last step time for a player.
+        /// </summary>
         public static bool TryGetLastStep(Player player, out float time)
         {
             time = -1f;
@@ -151,6 +172,9 @@ namespace AIRefactored.AI.Helpers
             return FootstepTimestamps.TryGetValue(player.ProfileId, out time);
         }
 
+        /// <summary>
+        /// Returns the last known position associated with a player's sound event.
+        /// </summary>
         public static bool TryGetSoundPosition(Player player, out Vector3 pos)
         {
             pos = Vector3.zero;
@@ -162,6 +186,9 @@ namespace AIRefactored.AI.Helpers
 
         #region Internal
 
+        /// <summary>
+        /// Triggers squad comms for all nearby bots (within hearing), stutter/echo-proof.
+        /// </summary>
         private static void TriggerSquadPing(string sourceId, Vector3 location, bool isGunshot)
         {
             try
@@ -208,6 +235,9 @@ namespace AIRefactored.AI.Helpers
             }
         }
 
+        /// <summary>
+        /// Returns true if the vector is valid for event/registry use.
+        /// </summary>
         private static bool IsValidVector(Vector3 v)
         {
             return !float.IsNaN(v.x) && !float.IsInfinity(v.x) &&

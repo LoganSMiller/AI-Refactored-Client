@@ -677,6 +677,25 @@ namespace AIRefactored.AI
             {
                 Debug.LogError("[BotPersonalityPresets] ApplyRandomBlend: Clamping failed: " + ex);
             }
+
+        }
+        
+        /// <summary>
+        /// Returns a random, fully-blended bot personality profile from all valid types.
+        /// Use to maximize variety for dynamic bot assignments.
+        /// </summary>
+        public static BotPersonalityProfile GetRandom()
+        {
+            // You may exclude any types you don't want (e.g., Dumb, Camper, etc.)
+            var allowed = new List<PersonalityType>();
+            foreach (var t in (PersonalityType[])Enum.GetValues(typeof(PersonalityType)))
+            {
+                // Example exclusion: skip Dumb/Camper if desired
+                if (t != PersonalityType.Dumb && t != PersonalityType.Camper)
+                    allowed.Add(t);
+            }
+            int idx = UnityEngine.Random.Range(0, allowed.Count);
+            return GenerateProfile(allowed[idx]);
         }
     }
 }

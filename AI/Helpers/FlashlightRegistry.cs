@@ -38,6 +38,9 @@ namespace AIRefactored.AI.Helpers
 
         #region Public API
 
+        /// <summary>
+        /// Enumerates all active tactical flashlights in the scene, updating last known positions.
+        /// </summary>
         public static IEnumerable<Light> GetActiveFlashlights()
         {
             ActiveLights.Clear();
@@ -65,11 +68,18 @@ namespace AIRefactored.AI.Helpers
             return ActiveLights;
         }
 
+        /// <summary>
+        /// Returns read-only list of last known positions for all detected flashlights.
+        /// </summary>
         public static IReadOnlyList<Vector3> GetLastKnownFlashlightPositions()
         {
             return LastKnownFlashPositions;
         }
 
+        /// <summary>
+        /// Checks if any active flashlight is currently exposing (blinding) the given player. 
+        /// All positional/angle logic is routed through EFTPlayerUtil and validated.
+        /// </summary>
         public static bool IsExposingBot(Player player, out Light blindingLight, float customMaxDist = MaxExposureDistance)
         {
             blindingLight = null;
@@ -129,6 +139,9 @@ namespace AIRefactored.AI.Helpers
             return false;
         }
 
+        /// <summary>
+        /// Returns true if any flickering tactical flashlight is detected (placeholder/expansion).
+        /// </summary>
         public static bool IsFlickeringFlashlightActive()
         {
             return false;
@@ -138,6 +151,9 @@ namespace AIRefactored.AI.Helpers
 
         #region Internal
 
+        /// <summary>
+        /// Returns true if the given light is a valid tactical flashlight for AI exposure/vision logic.
+        /// </summary>
         private static bool IsValidTacticalLight(Light light)
         {
             try

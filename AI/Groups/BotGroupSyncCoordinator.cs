@@ -106,12 +106,18 @@ namespace AIRefactored.AI.Groups
 
         #region Public API (BotBrain-Driven)
 
+        /// <summary>
+        /// Tick must be called by BotBrain to refresh squad state and ensure pooling safety.
+        /// </summary>
         public void Tick(float time)
         {
             if (!IsActive) return;
             try { RefreshTeammateCaches(); } catch { }
         }
 
+        /// <summary>
+        /// Shares a fallback position to the squad.
+        /// </summary>
         public void ShareFallbackToSquad(Vector3 fallback, float now)
         {
             _fallbackPoint = fallback;
@@ -128,6 +134,9 @@ namespace AIRefactored.AI.Groups
             }
         }
 
+        /// <summary>
+        /// Shares a danger position (panic/fallback) with squad.
+        /// </summary>
         public void ShareDangerToSquad(Vector3 dangerPos, float now)
         {
             _lastDangerPosition = dangerPos;
@@ -145,6 +154,9 @@ namespace AIRefactored.AI.Groups
             }
         }
 
+        /// <summary>
+        /// Shares a loot position to the squad.
+        /// </summary>
         public void ShareLootToSquad(Vector3 loot)
         {
             _lootPoint = loot;
@@ -156,6 +168,9 @@ namespace AIRefactored.AI.Groups
             }
         }
 
+        /// <summary>
+        /// Shares an extract position to the squad.
+        /// </summary>
         public void ShareExtractToSquad(Vector3 extract)
         {
             _extractPoint = extract;

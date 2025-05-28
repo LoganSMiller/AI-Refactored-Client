@@ -47,9 +47,6 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         #region Constructor
 
-        /// <summary>
-        /// Instantiates a MissionSwitcher for the provided bot and cache.
-        /// </summary>
         public MissionSwitcher(BotOwner bot, BotComponentCache cache)
         {
             if (!EFTPlayerUtil.IsValidBotOwner(bot) || cache == null)
@@ -88,7 +85,7 @@ namespace AIRefactored.AI.Missions.Subsystems
 
                 string name = _bot.Profile?.Info?.Nickname ?? "Unknown";
 
-                // 1. Escalate to Fight if under fire and aggressive
+                // Escalate to Fight if under fire and aggressive
                 if (_bot.Memory?.IsUnderFire == true &&
                     _profile.AggressionLevel > 0.6f &&
                     currentMission != MissionType.Fight)
@@ -100,7 +97,7 @@ namespace AIRefactored.AI.Missions.Subsystems
                     return;
                 }
 
-                // 2. Switch to Loot if loot-driven and opportunity exists
+                // Switch to Loot if loot-driven and loot exists
                 if (currentMission == MissionType.Quest &&
                     _profile.PreferredMission == MissionBias.Loot &&
                     _lootDecision?.ShouldLootNow() == true)
@@ -110,12 +107,12 @@ namespace AIRefactored.AI.Missions.Subsystems
                     {
                         currentMission = MissionType.Loot;
                         _lastSwitchTime = time;
-                        _log.LogDebug($"[MissionSwitcher] {name} switching → Loot (loot opportunity nearby)");
+                        _log.LogDebug($"[MissionSwitcher] {name} switching → Loot (loot nearby)");
                         return;
                     }
                 }
 
-                // 3. Revert to Quest if squad lost during combat
+                // Revert to Quest if squad is lost during fight
                 if (currentMission == MissionType.Fight &&
                     isGroupAligned != null &&
                     !isGroupAligned())
@@ -123,7 +120,7 @@ namespace AIRefactored.AI.Missions.Subsystems
                     currentMission = MissionType.Quest;
                     _lastSwitchTime = time;
                     resumeQuesting?.Invoke();
-                    _log.LogDebug($"[MissionSwitcher] {name} falling back → Quest (squad separation)");
+                    _log.LogDebug($"[MissionSwitcher] {name} falling back → Quest (squad separated)");
                 }
             }
             catch (Exception ex)

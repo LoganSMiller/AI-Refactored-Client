@@ -8,7 +8,6 @@
 namespace AIRefactored.AI.Helpers
 {
     using System;
-    using System.Collections.Generic;
     using AIRefactored.AI.Core;
     using AIRefactored.AI.Memory;
     using AIRefactored.Core;
@@ -43,6 +42,9 @@ namespace AIRefactored.AI.Helpers
 
         #region Main API
 
+        /// <summary>
+        /// Determines if a bot should be suppressed based on vision, lighting, threat, and current panic.
+        /// </summary>
         public static bool ShouldTriggerSuppression(Player player, Vector3? threat = null, float visibleDistThreshold = 12f, float ambientThreshold = 0.25f)
         {
             try
@@ -75,6 +77,9 @@ namespace AIRefactored.AI.Helpers
             }
         }
 
+        /// <summary>
+        /// Applies suppression/panic effects to a bot, marks danger, and propagates to squadmates.
+        /// </summary>
         public static void TrySuppressBot(Player player, Vector3 threatPos, IPlayer source = null, float rawDamage = 0f)
         {
             try
@@ -116,6 +121,9 @@ namespace AIRefactored.AI.Helpers
 
         #region Calculation/Helper Logic
 
+        /// <summary>
+        /// Calculates suppression "score" from context, wounds, caution, damage, and threat distance.
+        /// </summary>
         private static float CalculateSuppressionScore(BotComponentCache cache, Player player, Vector3 threatPos, float rawDamage)
         {
             float caution = cache?.PersonalityProfile?.Caution ?? 0.5f;
@@ -149,6 +157,9 @@ namespace AIRefactored.AI.Helpers
             return suppression;
         }
 
+        /// <summary>
+        /// Propagates suppression to squadmates within radius, with chance. Fully error-guarded.
+        /// </summary>
         private static void PropagateSuppressionToSquad(BotOwner bot, BotComponentCache cache, Vector3 threat)
         {
             try
@@ -187,6 +198,9 @@ namespace AIRefactored.AI.Helpers
             }
         }
 
+        /// <summary>
+        /// Marks the position as a tactical danger zone for fallback/awareness.
+        /// </summary>
         private static void MarkDangerZone(BotOwner bot, Vector3 position)
         {
             try
@@ -204,6 +218,9 @@ namespace AIRefactored.AI.Helpers
 
         #region Diagnostics
 
+        /// <summary>
+        /// Returns true if the player is currently suppressed (panicking).
+        /// </summary>
         public static bool IsSuppressed(Player player)
         {
             try

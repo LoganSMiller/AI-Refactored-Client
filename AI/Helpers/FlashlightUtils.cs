@@ -84,7 +84,11 @@ namespace AIRefactored.AI.Helpers
         /// </summary>
         private static bool IsValid(Transform tf)
         {
-            return tf != null && !float.IsNaN(tf.position.x) && !float.IsNaN(tf.forward.x);
+            return tf != null &&
+                   !float.IsNaN(tf.position.x) && !float.IsInfinity(tf.position.x) &&
+                   !float.IsNaN(tf.position.y) && !float.IsInfinity(tf.position.y) &&
+                   !float.IsNaN(tf.position.z) && !float.IsInfinity(tf.position.z) &&
+                   !float.IsNaN(tf.forward.x) && !float.IsInfinity(tf.forward.x);
         }
     }
 }

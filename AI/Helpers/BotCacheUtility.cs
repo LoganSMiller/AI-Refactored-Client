@@ -40,7 +40,7 @@ namespace AIRefactored.AI.Helpers
         #region Public API
 
         /// <summary>
-        /// Returns all currently active bot caches.
+        /// Enumerates all currently active bot caches (only live bots, bulletproof).
         /// </summary>
         public static IEnumerable<BotComponentCache> AllActiveBots()
         {
@@ -52,7 +52,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Logs all known bot caches to the logger (debug/dev only).
+        /// Debug: logs all registered bot caches and states (for development only).
         /// </summary>
         public static void DumpCache()
         {
@@ -68,7 +68,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Try-get cache for a given BotOwner. Safe, error-contained.
+        /// Attempts to get the registered cache for a BotOwner. 100% error-safe.
         /// </summary>
         public static bool TryGet(BotOwner bot, out BotComponentCache cache)
         {
@@ -86,7 +86,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Gets cache for a BotOwner, or null.
+        /// Gets cache for a BotOwner, or null if not present.
         /// </summary>
         public static BotComponentCache GetCache(BotOwner bot)
         {
@@ -96,7 +96,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Gets cache for a Player, or null.
+        /// Gets cache for a Player, or null if not present.
         /// </summary>
         public static BotComponentCache GetCache(Player player)
         {
@@ -106,7 +106,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Gets cache by ProfileId, or null.
+        /// Gets cache by ProfileId, or null if not present.
         /// </summary>
         public static BotComponentCache GetCache(string profileId)
         {
@@ -116,7 +116,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Gets display name for a bot cache.
+        /// Returns a readable display name for the bot (or "Unknown" if not available).
         /// </summary>
         public static string GetBotName(BotComponentCache cache)
         {
@@ -126,7 +126,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Returns the group sync coordinator for a cache (fallback-safe).
+        /// Returns the group sync coordinator for a bot cache (null if not present).
         /// </summary>
         public static BotGroupSyncCoordinator GetGroupSync(BotComponentCache cache)
         {
@@ -136,7 +136,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Gets the closest alive bot cache to the given point (within range).
+        /// Gets the closest alive bot cache to the given point (within range), or null if none found.
         /// </summary>
         public static BotComponentCache GetClosestBot(Vector3 origin, float maxDistance)
         {
@@ -162,7 +162,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Gets head transform of the bot, if available.
+        /// Gets the head transform for a bot, or null if unavailable.
         /// </summary>
         public static Transform Head(BotComponentCache cache)
         {
@@ -179,8 +179,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Registers the bot and cache into the active registry.
-        /// No duplicate or invalid wiring, bulletproof against null or invalid bots.
+        /// Registers a BotOwner and its component cache to the central registry. Bulletproof; no side-effect error propagation.
         /// </summary>
         public static void Register(BotOwner bot, BotComponentCache cache)
         {
@@ -195,7 +194,7 @@ namespace AIRefactored.AI.Helpers
                 if (!string.IsNullOrEmpty(pid))
                     ProfileIdLookup[pid] = cache;
 
-                // Local-only side effects: never cascades on failure.
+                // Local-only: isolated registration to side systems (never breaks main registry)
                 try { BotTeamTracker.RegisterFromBot(bot); } catch (Exception ex) { Logger.LogWarning($"[BotCacheUtility] Team register failed: {ex.Message}"); }
                 try { GroupMissionCoordinator.RegisterFromBot(bot); } catch (Exception ex) { Logger.LogWarning($"[BotCacheUtility] Mission register failed: {ex.Message}"); }
             }
@@ -206,8 +205,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Removes bot from all registries (cache, profile lookup, group).
-        /// No error propagation, safe for all shutdown/recovery cycles.
+        /// Unregisters a BotOwner from all registries (cache, profile, group). Isolated, teardown-safe.
         /// </summary>
         public static void Unregister(BotOwner bot)
         {
@@ -231,7 +229,7 @@ namespace AIRefactored.AI.Helpers
         }
 
         /// <summary>
-        /// Completely clears all bot caches and side systems. Used during full raid teardown/reset.
+        /// Completely clears all bot caches and local state. Used only during full raid teardown/reset.
         /// </summary>
         public static void ClearAll()
         {
