@@ -170,6 +170,7 @@ namespace AIRefactored.AI.Combat.States
 
                     Vector3 advancePoint = GetAdvancePoint(botPos, targetPos, distToTarget, out bool usedCover, out bool usedSquad);
 
+                    // Safety: strictly require advance point to be NavMesh-valid, not on a door, and Y-clamped
                     if (!IsAdvancePointSafe(botPos, advancePoint))
                         return;
 
@@ -202,21 +203,18 @@ namespace AIRefactored.AI.Combat.States
                         {
                             _cache.GroupComms?.TrySay(EPhraseTrigger.Going, 0.96f, true);
                         }
-                        if (NavMesh.SamplePosition(moveTarget, out NavMeshHit hit, 0.65f, NavMesh.AllAreas))
+
+                        // *** THIS IS THE ONLY MOVEMENT CALL ***
+                        if (BotNavHelper.IsNavMeshPositionValid(moveTarget) && !BotNavHelper.IsBlockedByClosedDoor(botPos, moveTarget))
                         {
-                            Vector3 final = ClampY(hit.position, botPos);
-                            if (final.y > -2.5f)
-                            {
-                                BotMovementHelper.SmoothMoveToSafe(_bot, final, false, cohesion);
-                                _lastIssuedMove = final;
-                                _lastMoveTime = now;
-                            }
+                            BotMovementHelper.SmoothMoveToSafe(_bot, moveTarget, false, cohesion);
+                            _lastIssuedMove = moveTarget;
+                            _lastMoveTime = now;
                         }
                     }
 
                     SetStance(distToTarget, advancePoint, usedCover, _cache.Perception?.IsSuppressed ?? false);
                 }
-
                 // --- 6. Continuous Monitoring/Recovery Layer ---
                 // (Handled by movement helper auto-recovery; fallback queued by CombatStateMachine if needed.)
             }
@@ -311,13 +309,19 @@ namespace AIRefactored.AI.Combat.States
             if (dist < SafeMoveMin || dist > SafeMoveMax)
                 return false;
 
+            if (!BotNavHelper.IsNavMeshPositionValid(target))
+                return false;
+
             if (!NavMesh.SamplePosition(target, out var hit, 0.55f, NavMesh.AllAreas))
                 return false;
 
             if (Mathf.Abs(hit.position.y - current.y) > MaxNavmeshDeltaY)
                 return false;
 
-            return !BotNavHelper.IsBlockedByClosedDoor(current, target);
+            if (BotNavHelper.IsBlockedByClosedDoor(current, target))
+                return false;
+
+            return true;
         }
 
         private static Vector3 ClampY(Vector3 v, Vector3 basePos)

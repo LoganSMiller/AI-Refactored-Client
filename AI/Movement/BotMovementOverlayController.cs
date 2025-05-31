@@ -55,7 +55,6 @@ namespace AIRefactored.AI.Movement
 
                 float now = Time.time;
 
-                // Get move intent only from mission/planner. Never issue move for overlays or tick.
                 Vector3 desiredDir = _cache.MissionEvaluator?.GetCurrentIntentDirection() ?? Vector3.zero;
                 if (!IsVectorValid(desiredDir)) return;
 
@@ -65,21 +64,15 @@ namespace AIRefactored.AI.Movement
                 Vector3 candidateTarget = _bot.Position + plannedDir.normalized * StepDistance;
                 if (!IsVectorValid(candidateTarget)) return;
 
-                // NavMesh-validate the move
-                if (!NavMesh.SamplePosition(candidateTarget, out NavMeshHit hit, 1.2f, NavMesh.AllAreas))
-                    return;
-                Vector3 navTarget = hit.position;
-                if (!IsVectorValid(navTarget)) return;
-
                 // Dedupe and cooldown: Only issue move if it's a new target or cooldown elapsed
                 bool cooldownReady = (now - _moveCache.LastMoveTime) > MoveCooldown;
-                bool targetNew = (_moveCache.LastIssuedTarget - navTarget).sqrMagnitude > MinDeltaSqr;
+                bool targetNew = (_moveCache.LastIssuedTarget - candidateTarget).sqrMagnitude > MinDeltaSqr;
                 if (cooldownReady || targetNew)
                 {
-                    // Hardened: Never issue move unless all checks above pass (anti-oscillation, anti-NAN/Inf)
-                    _moveCache.LastIssuedTarget = navTarget;
+                    // Let the movement helper handle all NavMesh/sample/validation!
+                    _moveCache.LastIssuedTarget = candidateTarget;
                     _moveCache.LastMoveTime = now;
-                    BotMovementHelper.SmoothMoveToSafe(_bot, navTarget, slow: false, cohesion: GetCohesion());
+                    BotMovementHelper.SmoothMoveToSafe(_bot, candidateTarget, slow: false, cohesion: GetCohesion());
                 }
             }
             catch (Exception ex)

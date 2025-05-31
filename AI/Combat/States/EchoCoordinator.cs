@@ -90,7 +90,7 @@ namespace AIRefactored.AI.Combat.States
                         continue;
 
                     Vector3 fallbackPoint = GetEFTSafeFallbackPoint(mate, retreatPosition, selfPos, mateCache);
-                    if (!IsValid(fallbackPoint) || !BotNavHelper.IsNavMeshPositionValid(fallbackPoint))
+                    if (!IsValid(fallbackPoint) || !BotNavHelper.IsNavMeshPositionValid(fallbackPoint) || BotNavHelper.IsBlockedByClosedDoor(mate.Position, fallbackPoint))
                         continue;
 
                     float cohesion = Mathf.Clamp(mateCache?.PersonalityProfile?.Cohesion ?? 1f, 0.7f, 1.3f);

@@ -140,6 +140,7 @@ namespace AIRefactored.AI.Combat
 
                 if (distance > maxRange)
                 {
+                    // Never teleport, never snap. Only overlay-advance, micro-drifts, and path-checked moves.
                     if (profile.ChaosFactor > 0f && UnityEngine.Random.value < profile.ChaosFactor * 0.7f)
                     {
                         if (BotNavHelper.TryGetSafeTarget(_bot, out var advance) && IsVectorValid(advance))

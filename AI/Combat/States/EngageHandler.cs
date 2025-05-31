@@ -29,6 +29,7 @@ namespace AIRefactored.AI.Combat.States
         private const float MaxAdvanceDelay = 0.19f;
         private const float MaxNavSampleRadius = 1.6f;
         private const float MaxAdvanceDistance = 16.2f;
+        private const float MinAdvanceDistance = 0.13f;
         private const float AdvanceSmoothing = 4.4f;
         private const float IdleScanPauseMin = 0.19f;
         private const float IdleScanPauseMax = 0.51f;
@@ -53,6 +54,8 @@ namespace AIRefactored.AI.Combat.States
         private bool _hasArrived;
         private float _anticipateUntil;
         private float _giveUpUntil;
+        private Vector3 _lastIssuedMove;
+        private float _lastMoveTime;
 
         #endregion
 
@@ -77,6 +80,8 @@ namespace AIRefactored.AI.Combat.States
             _hasArrived = false;
             _anticipateUntil = 0f;
             _giveUpUntil = 0f;
+            _lastIssuedMove = Vector3.zero;
+            _lastMoveTime = -10f;
         }
 
         #endregion
@@ -146,15 +151,22 @@ namespace AIRefactored.AI.Combat.States
                         }
                     }
 
-                    // Idle look/scan overlays—scans, jitter, stance.
+                    // Idle look/scan overlays—scans, jitter, stance (randomized realistic crouch/stand)
                     if (_idlePauseUntil < now)
                     {
                         _lastIdlePause = UnityEngine.Random.Range(IdleScanPauseMin, IdleScanPauseMax);
                         _idlePauseUntil = now + _lastIdlePause;
                         if (UnityEngine.Random.value < 0.65f)
                             SmoothIdleLookScan();
+
                         if (_cache.PoseController != null && UnityEngine.Random.value < 0.51f)
-                            _cache.PoseController.IdleScanStance();
+                        {
+                            // Realistic pose randomization: crouch/stand in place, never broken/missing
+                            if (UnityEngine.Random.value < 0.5f)
+                                _cache.PoseController.Crouch();
+                            else
+                                _cache.PoseController.Stand();
+                        }
                     }
 
                     // Reset give-up after cooldown, if applicable.
@@ -175,13 +187,17 @@ namespace AIRefactored.AI.Combat.States
                     return;
 
                 float advanceSqr = (safeDest - _bot.Position).sqrMagnitude;
-                if (_bot.Mover == null || advanceSqr >= MaxAdvanceDistance * MaxAdvanceDistance)
+                if (_bot.Mover == null || advanceSqr >= MaxAdvanceDistance * MaxAdvanceDistance || advanceSqr < MinAdvanceDistance * MinAdvanceDistance)
                     return;
 
                 Vector3 moveDir = safeDest - _bot.Position;
                 moveDir.y = 0f;
 
                 if (moveDir.sqrMagnitude < 0.01f)
+                    return;
+
+                // Teleport/snap prevention: Only issue movement if not spammed, not repeated, and not teleporting
+                if ((_lastIssuedMove - safeDest).sqrMagnitude < 0.0001f && now - _lastMoveTime < 0.4f)
                     return;
 
                 // Blend movement direction for ultra-realistic pathing.
@@ -194,11 +210,14 @@ namespace AIRefactored.AI.Combat.States
                 float cohesion = Mathf.Clamp(_cache.PersonalityProfile?.Cohesion ?? 1f, 0.7f, 1.3f);
                 Vector3 humanizedTarget = _bot.Position + blended * moveDir.magnitude;
 
-                // Apply micro-jitter only if not suppressed.
+                // Micro-jitter (only if not suppressed)
                 if (!(_cache.Perception?.IsSuppressed ?? false))
                     humanizedTarget = BotMovementHelper.ApplyMicroDrift(humanizedTarget, _bot.ProfileId, Time.frameCount, _cache.PersonalityProfile);
 
                 BotMovementHelper.SmoothMoveToSafe(_bot, humanizedTarget, slow: false, cohesion);
+                _lastIssuedMove = humanizedTarget;
+                _lastMoveTime = now;
+
                 ApplyEngagementStance(advanceSqr, safeDest);
 
                 if (_bot.BotTalk != null && UnityEngine.Random.value < 0.09f)

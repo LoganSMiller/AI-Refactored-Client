@@ -34,6 +34,7 @@ namespace AIRefactored.AI.Combat.States
         private const float MaxHotspotRandomOffset = 1.1f;
         private const float NavMeshSampleRadius = 1.2f;
         private const float MaxPatrolDistance = 18f;
+        private const float MinPatrolMoveDistance = 0.14f;
         private const float PatrolLookPauseMin = 0.35f;
         private const float PatrolLookPauseMax = 0.95f;
         private const float SquadSpread = 1.13f;
@@ -58,6 +59,7 @@ namespace AIRefactored.AI.Combat.States
         private bool _isLeader;
         private bool _isFollower;
         private float _followerLagUntil = -1000f;
+        private Vector3 _lastIssuedMove = Vector3.zero;
 
         #endregion
 
@@ -71,6 +73,7 @@ namespace AIRefactored.AI.Combat.States
             _switchCooldownBase = switchCooldownBase;
             _isLeader = IsSquadLeader(_bot);
             _isFollower = !_isLeader && (_bot?.BotsGroup?.MembersCount ?? 0) > 1;
+            _lastIssuedMove = Vector3.zero;
         }
 
         #endregion
@@ -163,8 +166,13 @@ namespace AIRefactored.AI.Combat.States
                 }
 
                 target = GetNavMeshSafe(target, _bot.Position);
-                if (!IsVectorValid(target) || (target - _bot.Position).sqrMagnitude > MaxPatrolDistance * MaxPatrolDistance)
+                float moveDist = (target - _bot.Position).magnitude;
+                if (!IsVectorValid(target) || moveDist > MaxPatrolDistance || moveDist < MinPatrolMoveDistance)
                     target = _bot.Position;
+
+                // Dedup overlay, anti-teleport
+                if ((_lastIssuedMove - target).sqrMagnitude < 0.0001f)
+                    return;
 
                 float patrolCohesion = Mathf.Clamp(_cache?.PersonalityProfile?.Cohesion ?? 1f, 0.7f, 1.3f);
 
@@ -174,6 +182,8 @@ namespace AIRefactored.AI.Combat.States
                     _followerLagUntil = time + UnityEngine.Random.Range(FollowerLagSeconds, FollowerLagSeconds * 2.4f);
 
                 BotMovementHelper.SmoothMoveToSafe(_bot, target, slow: true, cohesion: patrolCohesion);
+                _lastIssuedMove = target;
+
                 BotCoverHelper.TrySetStanceFromNearbyCover(_cache, target);
 
                 if (UnityEngine.Random.value < 0.17f + (_cache.PersonalityProfile?.Caution ?? 0f) * 0.11f)

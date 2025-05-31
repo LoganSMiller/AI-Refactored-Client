@@ -39,6 +39,8 @@ namespace AIRefactored.AI.Combat.States
         private const float IdleLookIntervalMax = 1.15f;
         private const float GiveUpChanceBase = 0.13f;
         private const float AllClearVoiceChance = 0.25f;
+        private const float MaxInvestigateMoveDistance = 7.5f; // max overlay, no teleport
+        private const float MinInvestigateMoveDistance = 0.13f;
 
         #endregion
 
@@ -51,6 +53,7 @@ namespace AIRefactored.AI.Combat.States
         private float _nextIdleScanTime = -1000f;
         private bool _hasGivenUp = false;
         private bool _hasArrived = false;
+        private Vector3 _lastIssuedMove = Vector3.zero;
 
         #endregion
 
@@ -73,6 +76,7 @@ namespace AIRefactored.AI.Combat.States
             _hasArrived = false;
             _lastInvestigateTime = -1000f;
             _nextIdleScanTime = -1000f;
+            _lastIssuedMove = Vector3.zero;
         }
 
         /// <summary>
@@ -119,7 +123,6 @@ namespace AIRefactored.AI.Combat.States
                                (1f + (_cache.PersonalityProfile?.Caution ?? 0.1f) * 0.55f);
             if (now - _lastInvestigateTime < anticipate) return;
 
-            _lastInvestigateTime = now;
             Vector3 dest = SampleNavMesh(target);
 
             // Squad formation overlay
@@ -137,12 +140,19 @@ namespace AIRefactored.AI.Combat.States
             dest = BotMovementHelper.ApplyMicroDrift(dest, _bot.ProfileId, Time.frameCount, _cache.PersonalityProfile);
             float cohesion = Mathf.Clamp(_cache?.PersonalityProfile?.Cohesion ?? 1f, 0.7f, 1.3f);
 
+            float distance = Vector3.Distance(_bot.Position, dest);
+            // --- Anti-teleport/deduplication logic ---
+            if (distance > MaxInvestigateMoveDistance || distance < MinInvestigateMoveDistance)
+                return;
+            if ((_lastIssuedMove - dest).sqrMagnitude < 0.0001f)
+                return;
+
             if (_bot.Mover != null)
             {
                 BotMovementHelper.SmoothMoveToSafe(_bot, dest, slow: true, cohesion);
+                _lastIssuedMove = dest;
                 _memory?.MarkCleared(dest);
 
-                float distance = Vector3.Distance(_bot.Position, dest);
                 if (!_hasArrived && distance < 1.1f)
                 {
                     _hasArrived = true;
@@ -167,6 +177,8 @@ namespace AIRefactored.AI.Combat.States
                         _cache.PoseController.TrySetStanceFromNearbyCover(dest);
                 }
             }
+
+            _lastInvestigateTime = now;
         }
 
         /// <summary>

@@ -37,6 +37,7 @@ namespace AIRefactored.AI.Combat.States
         private const float MinCohesion = 0.7f;
         private const float MaxCohesion = 1.3f;
         private const float MoveCooldown = 0.62f;
+        private const float MaxFallbackDistance = 9.7f; // Never allow fallback move > 10m
 
         #endregion
 
@@ -51,6 +52,7 @@ namespace AIRefactored.AI.Combat.States
         private bool _hasArrived;
         private bool _panicSpread;
         private float _lastMoveIssueTime;
+        private Vector3 _lastIssuedMove;
 
         #endregion
 
@@ -62,6 +64,7 @@ namespace AIRefactored.AI.Combat.States
             _bot = cache?.Bot;
             _target = _bot?.Position ?? Vector3.zero;
             _path = TempListPool.Rent<Vector3>();
+            _lastIssuedMove = Vector3.zero;
             Clear();
         }
 
@@ -84,6 +87,7 @@ namespace AIRefactored.AI.Combat.States
             _anticipateUntil = -1f;
             _panicSpread = false;
             _lastMoveIssueTime = -MoveCooldown;
+            _lastIssuedMove = Vector3.zero;
         }
 
         public void Cancel() => Clear();
@@ -225,6 +229,15 @@ namespace AIRefactored.AI.Combat.States
 
             _retryCount = 0;
 
+            // --- Anti-teleport logic: Only allow overlays that are within sane distance, not spammed, and not repeated ---
+            float dist = Vector3.Distance(_bot.Position, navSafe);
+            if (dist > MaxFallbackDistance || dist < MinArrivalDistance)
+                return; // Too far or too close: don't move
+
+            // Never overlay same fallback destination repeatedly within cooldown
+            if ((_lastIssuedMove - navSafe).sqrMagnitude < 0.0001f && now - _lastMoveIssueTime < MoveCooldown)
+                return;
+
             // 3. Human-like move: micro-drift, squad cohesion, cooldown/dedup overlay, never tick-spam
             float cohesion = Mathf.Clamp(_cache?.PersonalityProfile?.Cohesion ?? 1f, MinCohesion, MaxCohesion);
             Vector3 adjusted = BotMovementHelper.ApplyMicroDrift(navSafe, _bot.ProfileId, Time.frameCount, _cache.PersonalityProfile);
@@ -235,6 +248,7 @@ namespace AIRefactored.AI.Combat.States
                 BotMovementHelper.SmoothMoveToSafe(_bot, adjusted, slow: true, cohesion);
                 BotCoverHelper.TrySetStanceFromNearbyCover(_cache, adjusted);
                 _lastMoveIssueTime = now;
+                _lastIssuedMove = adjusted;
             }
 
             // 4. Arrival detection and transition
