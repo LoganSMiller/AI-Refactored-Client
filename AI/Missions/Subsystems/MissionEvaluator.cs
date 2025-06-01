@@ -169,7 +169,7 @@ namespace AIRefactored.AI.Missions.Subsystems
         }
 
         /// <summary>
-        /// Overlay/event-based extraction attempt. No tick, no direct position set.
+        /// Overlay/event-based extraction attempt. Overlay-only; never sets position directly.
         /// </summary>
         public void TryExtract()
         {
@@ -201,6 +201,7 @@ namespace AIRefactored.AI.Missions.Subsystems
                     NavMesh.SamplePosition(best.transform.position, out NavMeshHit hit, NavSampleRadius, AIRefactoredLayerMasks.NavMeshAll))
                 {
                     Vector3 drifted = BotMovementHelper.ApplyMicroDrift(hit.position, _bot.ProfileId, Time.frameCount, _profile);
+                    // Overlay/event-driven intent ONLY (not per-frame, not direct set)
                     BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: 1f);
 
                     if (_bot.BotTalk != null && UnityEngine.Random.value < 0.45f)
@@ -252,6 +253,7 @@ namespace AIRefactored.AI.Missions.Subsystems
                         NavMesh.SamplePosition(candidate, out var hit, NavSampleRadius, AIRefactoredLayerMasks.NavMeshAll))
                     {
                         Vector3 drifted = BotMovementHelper.ApplyMicroDrift(hit.position, _bot.ProfileId, Time.frameCount, _profile);
+                        // Overlay/event-driven intent ONLY (never tick-move)
                         BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: 1f);
                     }
                 }

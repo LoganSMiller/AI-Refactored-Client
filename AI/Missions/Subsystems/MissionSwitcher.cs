@@ -23,6 +23,7 @@ namespace AIRefactored.AI.Missions.Subsystems
     /// <summary>
     /// Dynamically selects bot mission types using realistic state-based logic.
     /// Never issues direct movement or transitions outside of localized mission change.
+    /// Errors are strictly isolated and never escalate.
     /// </summary>
     public sealed class MissionSwitcher
     {

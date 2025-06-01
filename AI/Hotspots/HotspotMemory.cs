@@ -12,8 +12,9 @@ namespace AIRefactored.AI.Hotspots
     using UnityEngine;
 
     /// <summary>
-    /// Tracks recent hotspot visits on a per-map basis. Prevents looped routing or retargeting.
-    /// Bulletproof: All logic is map-scoped, pooled, non-throwing, and isolation-safe.
+    /// Tracks recent hotspot visits on a per-map basis.
+    /// Prevents looped routing or retargeting.
+    /// Bulletproof: map-scoped, pooled, non-throwing, and isolation-safe.
     /// </summary>
     internal static class HotspotMemory
     {
@@ -25,9 +26,7 @@ namespace AIRefactored.AI.Hotspots
 
         #region Fields
 
-        /// <summary>
-        /// Structure: mapId → (position → lastVisitTime)
-        /// </summary>
+        // Structure: mapId → (position → lastVisitTime)
         private static readonly Dictionary<string, Dictionary<Vector3, float>> VisitedMap =
             new Dictionary<string, Dictionary<Vector3, float>>(16);
 

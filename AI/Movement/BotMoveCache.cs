@@ -38,6 +38,16 @@ namespace AIRefactored.AI.Movement
         public int LastMoveIntentType { get; set; } = 0;
 
         /// <summary>
+        /// Overlay/anticipation guard: set by event overlays when anticipation/fakeout is active.
+        /// </summary>
+        public bool AnticipationActive { get; set; } = false;
+
+        /// <summary>
+        /// Overlay lockout guard: set by overlays to block move during event lockouts (e.g., anticipation, suppression, door waits).
+        /// </summary>
+        public bool EventLockoutActive { get; set; } = false;
+
+        /// <summary>
         /// Resets all move state for this cache (pool/reuse/squad).
         /// </summary>
         public void Reset()
@@ -46,6 +56,8 @@ namespace AIRefactored.AI.Movement
             LastMoveTime = -1000f;
             LastMoveContext = "";
             LastMoveIntentType = 0;
+            AnticipationActive = false;
+            EventLockoutActive = false;
         }
 
         /// <summary>

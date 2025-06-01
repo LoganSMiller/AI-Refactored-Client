@@ -281,7 +281,7 @@ namespace AIRefactored.AI.Looting
         private void Say(EPhraseTrigger phrase)
         {
             if (_comms == null || Time.time - _lastVoiceTime < VoiceCooldown) return;
-            _comms.Say(phrase);
+            try { _comms.Say(phrase); } catch { }
             _lastVoiceTime = Time.time;
         }
 

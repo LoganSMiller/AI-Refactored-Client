@@ -19,6 +19,7 @@ namespace AIRefactored.AI.Memory
     /// <summary>
     /// Tactical enemy memory and zone clearing logic, bulletproof and BotBrain-driven.
     /// All expiry, zone, and sharing logic must be called via BotBrain.Tick().
+    /// Never issues navigation or movement commands, overlay-only memory logic.
     /// </summary>
     public sealed class BotTacticalMemory
     {
@@ -47,7 +48,7 @@ namespace AIRefactored.AI.Memory
         #region Initialization
 
         /// <summary>
-        /// Must be called at bot setup. Never self-initializes.
+        /// Must be called at bot setup. Never self-initializes or self-ticks.
         /// </summary>
         public void Initialize(BotComponentCache cache)
         {
@@ -126,7 +127,7 @@ namespace AIRefactored.AI.Memory
         #region Memory Management
 
         /// <summary>
-        /// Clears all tactical memory and extracted zones.
+        /// Clears all tactical memory and extracted zones. Never disables the system.
         /// </summary>
         public void ClearAll()
         {
@@ -184,7 +185,7 @@ namespace AIRefactored.AI.Memory
         }
 
         /// <summary>
-        /// Returns the most recently seen enemy position.
+        /// Returns the most recently seen enemy position (overlay/event-only).
         /// </summary>
         public Vector3 GetRecentEnemyMemory()
         {
@@ -239,19 +240,25 @@ namespace AIRefactored.AI.Memory
         }
 
         /// <summary>
-        /// Returns all enemy memory records (exposed for pooled use).
+        /// Returns all enemy memory records (exposed for pooled use by overlays/intents).
         /// </summary>
         public List<SeenEnemyRecord> GetAllMemory()
         {
             return _enemyMemoryList;
         }
 
+        /// <summary>
+        /// Adds a memory sync entry from a teammate (event-only, for squad overlays).
+        /// </summary>
         public void SyncMemory(Vector3 position)
         {
             try { RecordEnemyPosition(position, "AllyEcho", string.Empty); }
             catch (Exception ex) { Logger.LogError($"[BotTacticalMemory] SyncMemory failed: {ex}"); }
         }
 
+        /// <summary>
+        /// Shares this bot's enemy memory records with teammates (overlay/event-only).
+        /// </summary>
         public void ShareMemoryWith(List<BotComponentCache> teammates)
         {
             try
@@ -281,7 +288,7 @@ namespace AIRefactored.AI.Memory
         #region Tactical Evaluation
 
         /// <summary>
-        /// Marks a grid-snapped spot as cleared. 
+        /// Marks a grid-snapped spot as cleared (overlay/event-driven).
         /// </summary>
         public void MarkCleared(Vector3 position)
         {

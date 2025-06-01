@@ -61,7 +61,6 @@ namespace AIRefactored.AI.Hotspots
                             if (session != null)
                                 _sessions[bot] = session;
                         }
-
                         session?.Tick();
                     }
                     catch { }
@@ -82,9 +81,8 @@ namespace AIRefactored.AI.Hotspots
                 if (all == null || all.Count == 0)
                     return null;
 
-                List<HotspotRegistry.Hotspot> pool = HotspotRegistry.QueryNearby(bot.Position, 150f, null) ?? new List<HotspotRegistry.Hotspot>(all);
-
-                if (pool.Count == 0)
+                List<HotspotRegistry.Hotspot> pool = HotspotRegistry.QueryNearby(bot.Position, 150f, null);
+                if (pool == null || pool.Count == 0)
                     pool = new List<HotspotRegistry.Hotspot>(all);
 
                 bool defend = profile.Personality == PersonalityType.Camper ||

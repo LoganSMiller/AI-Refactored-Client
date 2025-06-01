@@ -20,9 +20,11 @@ namespace AIRefactored.AI.Helpers
     {
         #region Constants
 
-        private const float MinMoveDistance = 0.25f;      // Min distance for intent move
-        private const float MoveCooldown = 1.2f;          // Per-bot anti-spam cooldown (seconds)
+        private const float MinMoveDistance = 0.25f;
+        private const float MoveCooldown = 1.2f;
         private const float NavMeshSampleRadius = 1.5f;
+        private const float NavMeshSampleRadiusRetreat = 2.2f;
+        private const float YClampMax = 3.0f;
         private const float LookSmoothSpeed = 9.5f;
         private const float LookMaxDegPerSec = 160f;
         private const float StuckTimeout = 3.0f;
@@ -34,31 +36,50 @@ namespace AIRefactored.AI.Helpers
         #region Main Movement (Intent/Event-Only)
 
         /// <summary>
-        /// Moves the bot to a NavMesh-safe point with micro-drift. Called only from MovementIntentDispatcher or equivalent event logic.
+        /// Moves the bot to a NavMesh-safe point with micro-drift. Event/intent/overlay only. No per-frame movement.
+        /// Fully guarded for anticipation/fakeout/interaction/invalid overlay. No cache/cooldown update unless move is issued.
         /// </summary>
         public static void SmoothMoveToSafe(BotOwner bot, Vector3 destination, bool slow = true, float cohesion = 1f)
         {
             if (!IsAlive(bot)) return;
             var cache = bot?.GetComponent<BotComponentCache>();
             if (cache == null || cache.MoveCache == null) return;
-            if (!ShouldMove(bot, destination)) return;
-            if (IsMovementPaused(bot) || IsInInteractionState(bot)) return;
 
-            if (!NavMesh.SamplePosition(destination, out var hit, NavMeshSampleRadius, NavMesh.AllAreas))
+            // Overlay/event anticipation guard
+            if (cache.MoveCache.AnticipationActive || cache.MoveCache.EventLockoutActive)
                 return;
 
+            // Pause/interaction guard BEFORE sampling/dedup
+            if (IsMovementPaused(bot) || IsInInteractionState(bot))
+                return;
+
+            // Always NavMesh sample & drift BEFORE dedup/cooldown
+            if (!NavMesh.SamplePosition(destination, out var hit, NavMeshSampleRadius, NavMesh.AllAreas))
+                return;
             Vector3 safe = hit.position;
+            if (Mathf.Abs(safe.y - GetPosition(bot).y) > YClampMax)
+                safe.y = GetPosition(bot).y;
             if (!IsValid(safe)) return;
 
             Vector3 drifted = ApplyMicroDrift(safe, bot.ProfileId, Time.frameCount, cache.PersonalityProfile);
 
+            // Dedup/cooldown only on final sampled+drifted target
+            if (!ShouldMove(bot, drifted)) return;
+
+            // Bulletproof: Clamp against current position (never teleport)
+            if ((GetPosition(bot) - drifted).sqrMagnitude > 60f * 60f)
+                return;
+
+            // Issue move (never per-frame, always intent/event only)
             bot.Mover?.GoToPoint(drifted, slow, cohesion);
+
+            // Only now, sync move cache/cooldown
             cache.MoveCache.LastMoveTime = Time.time;
             cache.MoveCache.LastIssuedTarget = drifted;
         }
 
         /// <summary>
-        /// Returns true if the bot should move to this destination (distance, cooldown, dedup).
+        /// Returns true if the bot should move to this destination (distance, cooldown, dedup). Only check against final, drifted, NavMesh-safe position.
         /// </summary>
         public static bool ShouldMove(BotOwner bot, Vector3 destination)
         {
@@ -84,6 +105,7 @@ namespace AIRefactored.AI.Helpers
 
         /// <summary>
         /// Returns a pooled squad-safe retreat path for a bot, formation-aware. Never called per frame/tick.
+        /// All destinations strictly NavMesh-validated, y-clamped, and event/overlay only.
         /// </summary>
         public static List<Vector3> GetSquadSafeRetreatPath(BotOwner bot, Vector3 threatDir, float squadSpacing)
         {
@@ -114,13 +136,18 @@ namespace AIRefactored.AI.Helpers
             Vector3 retreatDir = offsetRot * -threatDir.normalized;
             Vector3 retreatTarget = origin + retreatDir * SquadRetreatDistance;
 
-            if (!NavMesh.SamplePosition(retreatTarget, out var navHit, 2.2f, NavMesh.AllAreas))
+            // NavMesh validate retreat
+            if (!NavMesh.SamplePosition(retreatTarget, out var navHit, NavMeshSampleRadiusRetreat, NavMesh.AllAreas))
             {
                 result.Add(origin);
                 return result;
             }
+            Vector3 safe = navHit.position;
+            if (Mathf.Abs(safe.y - origin.y) > YClampMax)
+                safe.y = origin.y;
+
             result.Add(origin);
-            result.Add(navHit.position);
+            result.Add(safe);
             return result;
         }
 
@@ -204,7 +231,8 @@ namespace AIRefactored.AI.Helpers
         {
             return !float.IsNaN(pos.x) && !float.IsInfinity(pos.x) &&
                    !float.IsNaN(pos.y) && !float.IsInfinity(pos.y) &&
-                   !float.IsNaN(pos.z) && !float.IsInfinity(pos.z);
+                   !float.IsNaN(pos.z) && !float.IsInfinity(pos.z) &&
+                   Mathf.Abs(pos.x) < 40000f && Mathf.Abs(pos.y) < 40000f && Mathf.Abs(pos.z) < 40000f;
         }
 
         private static bool IsAlive(BotOwner bot)
@@ -226,7 +254,11 @@ namespace AIRefactored.AI.Helpers
             return false;
         }
 
-        private static bool IsInInteractionState(BotOwner bot)
+        /// <summary>
+        /// Checks if bot is currently in an interaction state (loot, open, etc).
+        /// Now public for cross-system safety.
+        /// </summary>
+        public static bool IsInInteractionState(BotOwner bot)
         {
             var player = bot?.GetPlayer;
             if (player == null) return false;
@@ -240,6 +272,9 @@ namespace AIRefactored.AI.Helpers
                    state == EPlayerState.Approach;
         }
 
+        /// <summary>
+        /// Public safe alias for extraction moves (never teleports, always path-validated).
+        /// </summary>
         public static void SmoothMoveToSafeExit(BotOwner bot, Vector3 destination, bool slow = true, float cohesion = 1f)
         {
             SmoothMoveToSafe(bot, destination, slow, cohesion);

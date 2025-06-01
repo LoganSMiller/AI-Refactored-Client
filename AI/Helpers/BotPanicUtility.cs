@@ -31,9 +31,7 @@ namespace AIRefactored.AI.Helpers
             try
             {
                 if (IsEligible(cache))
-                {
                     cache.PanicHandler.TriggerPanic();
-                }
             }
             catch { }
         }
@@ -43,9 +41,8 @@ namespace AIRefactored.AI.Helpers
         /// </summary>
         public static void TriggerGroup(List<BotComponentCache> group)
         {
-            if (group == null)
-                return;
-
+            if (group == null) return;
+            int order = 0;
             for (int i = 0; i < group.Count; i++)
             {
                 try
@@ -54,8 +51,9 @@ namespace AIRefactored.AI.Helpers
                     if (!IsEligible(cache))
                         continue;
 
-                    float delay = 0.03f * i + GetPanicJitter(cache.Bot?.ProfileId, i);
+                    float delay = 0.03f * order + GetPanicJitter(cache.Bot?.ProfileId, order);
                     TriggerDelayedPanic(cache, delay);
+                    order++;
                 }
                 catch { }
             }
@@ -66,7 +64,7 @@ namespace AIRefactored.AI.Helpers
         /// </summary>
         public static void TriggerNearby(Vector3 origin, float radius)
         {
-            if (radius <= 0f)
+            if (radius <= 0f || float.IsNaN(radius) || float.IsInfinity(radius))
                 return;
 
             float radiusSqr = radius * radius;
@@ -76,20 +74,15 @@ namespace AIRefactored.AI.Helpers
             {
                 try
                 {
-                    if (!IsEligible(cache))
+                    if (!IsEligible(cache)) continue;
+
+                    Vector3 pos = cache.Bot?.Position ?? Vector3.zero;
+                    if (!IsVectorValid(pos) || (origin - pos).sqrMagnitude > radiusSqr)
                         continue;
 
-                    Vector3 pos = cache.Bot.Position;
-                    float dx = pos.x - origin.x;
-                    float dy = pos.y - origin.y;
-                    float dz = pos.z - origin.z;
-
-                    if ((dx * dx + dy * dy + dz * dz) <= radiusSqr)
-                    {
-                        float delay = 0.02f * order + GetPanicJitter(cache.Bot?.ProfileId, order);
-                        TriggerDelayedPanic(cache, delay);
-                        order++;
-                    }
+                    float delay = 0.02f * order + GetPanicJitter(cache.Bot?.ProfileId, order);
+                    TriggerDelayedPanic(cache, delay);
+                    order++;
                 }
                 catch { }
             }
@@ -103,14 +96,8 @@ namespace AIRefactored.AI.Helpers
 
         public static bool TryGetPanicComponent(BotComponentCache cache, out BotPanicHandler panic)
         {
-            if (cache?.PanicHandler != null)
-            {
-                panic = cache.PanicHandler;
-                return true;
-            }
-
-            panic = null;
-            return false;
+            panic = cache?.PanicHandler;
+            return panic != null;
         }
 
         #endregion
@@ -122,11 +109,11 @@ namespace AIRefactored.AI.Helpers
         /// </summary>
         private static bool IsEligible(BotComponentCache cache)
         {
-            return cache != null &&
-                   cache.Bot != null &&
-                   !cache.Bot.IsDead &&
-                   cache.PanicHandler != null &&
-                   !cache.PanicHandler.IsPanicking;
+            return cache != null
+                && cache.Bot != null
+                && !cache.Bot.IsDead
+                && cache.PanicHandler != null
+                && !cache.PanicHandler.IsPanicking;
         }
 
         /// <summary>
@@ -148,8 +135,7 @@ namespace AIRefactored.AI.Helpers
         /// </summary>
         private static void TriggerDelayedPanic(BotComponentCache cache, float delay)
         {
-            if (cache == null)
-                return;
+            if (cache == null) return;
 
             Task.Run(async () =>
             {
@@ -164,6 +150,13 @@ namespace AIRefactored.AI.Helpers
                 }
                 catch { }
             });
+        }
+
+        private static bool IsVectorValid(Vector3 v)
+        {
+            return !float.IsNaN(v.x) && !float.IsNaN(v.y) && !float.IsNaN(v.z)
+                && !float.IsInfinity(v.x) && !float.IsInfinity(v.y) && !float.IsInfinity(v.z)
+                && Mathf.Abs(v.x) < 40000f && Mathf.Abs(v.y) < 40000f && Mathf.Abs(v.z) < 40000f;
         }
 
         #endregion

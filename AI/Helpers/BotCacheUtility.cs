@@ -28,11 +28,9 @@ namespace AIRefactored.AI.Helpers
     {
         #region Internal State
 
-        // Central registry: maps BotOwner (strict instance) to BotComponentCache
         private static readonly Dictionary<BotOwner, BotComponentCache> CacheRegistry =
             new Dictionary<BotOwner, BotComponentCache>(64);
 
-        // Secondary index: maps ProfileId (case-insensitive) to BotComponentCache
         private static readonly Dictionary<string, BotComponentCache> ProfileIdLookup =
             new Dictionary<string, BotComponentCache>(64, StringComparer.OrdinalIgnoreCase);
 

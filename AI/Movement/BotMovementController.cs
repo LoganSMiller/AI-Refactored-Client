@@ -38,6 +38,9 @@ namespace AIRefactored.AI.Movement
         private const float LeanHoldMin = 1.0f, LeanHoldMax = 1.6f;
         private const float CoverRayLength = 1.8f;
 
+        /// <summary>
+        /// Attaches and initializes overlay/event-driven pose and movement overlays for this bot.
+        /// </summary>
         public void Initialize(BotComponentCache cache)
         {
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
@@ -51,21 +54,21 @@ namespace AIRefactored.AI.Movement
         }
 
         /// <summary>
-        /// Tick only handles overlays—NEVER issues movement. All movement is event/intent-only.
+        /// Tick only handles overlays—NEVER issues path movement. Overlay/event-only logic.
         /// </summary>
         public void Tick(float deltaTime)
         {
             if (_bot == null || _bot.IsDead || _bot.Mover == null || !_bot.GetPlayer.IsAI)
                 return;
 
-            TryLean();
+            TryLeanOverlay();
             TryLookOverlay();
         }
 
         /// <summary>
         /// Overlay-only: Lean logic based on cover and intent, never triggers a move.
         /// </summary>
-        private void TryLean()
+        private void TryLeanOverlay()
         {
             if (_cache?.Tilt == null || _bot?.Transform == null || _bot.IsDead)
                 return;
@@ -106,8 +109,8 @@ namespace AIRefactored.AI.Movement
         }
 
         /// <summary>
-        /// Overlay-only: Adjusts look direction for pose—never issues a move. 
-        /// Rate-limited, deduped, and overlay-safe. Never called more than once per intent.
+        /// Overlay-only: Adjusts look direction for pose—never issues a move.
+        /// Overlay-event, deduped, never spammed.
         /// </summary>
         private void TryLookOverlay()
         {
@@ -138,7 +141,7 @@ namespace AIRefactored.AI.Movement
 
         /// <summary>
         /// Issues a move command ONLY for real new intent/path (never called by overlays/tick).
-        /// Always deduped and cooldown-gated.
+        /// Always deduped and cooldown-gated. Movement is always routed via BotMovementHelper for anti-teleport/anti-spam/overlay-event safety.
         /// </summary>
         public void ForceMove(Vector3 target, bool slow = false, float cohesion = 1f)
         {
@@ -146,7 +149,7 @@ namespace AIRefactored.AI.Movement
                 return;
 
             float now = Time.time;
-            // Use global dedupe/cooldown logic (always matches BotMoveCache.cs and BotMovementHelper)
+            // Global dedupe/cooldown (matches BotMoveCache and BotMovementHelper logic)
             if (_moveCache.CanIssueMove(target, now))
             {
                 _moveCache.LastIssuedTarget = target;

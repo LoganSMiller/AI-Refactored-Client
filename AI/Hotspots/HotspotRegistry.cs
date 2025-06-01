@@ -15,8 +15,9 @@ namespace AIRefactored.AI.Hotspots
     using UnityEngine;
 
     /// <summary>
-    /// Global registry for tactical hotspots (loot/patrol/defense zones) per-map. Query-safe, zone-aware, alloc-guarded.
-    /// Bulletproof: All initialization, lookup, and query logic is fully isolated. Never cascades.
+    /// Global registry for tactical hotspots (loot/patrol/defense zones) per-map.
+    /// Query-safe, zone-aware, alloc-guarded. Bulletproof: All initialization, lookup,
+    /// and query logic is fully isolated. Never cascades.
     /// </summary>
     public static class HotspotRegistry
     {
@@ -101,8 +102,14 @@ namespace AIRefactored.AI.Hotspots
 
         #region Query API
 
+        /// <summary>
+        /// Returns all hotspots in the map.
+        /// </summary>
         public static IReadOnlyList<Hotspot> GetAll() => All;
 
+        /// <summary>
+        /// Returns all hotspots in a given zone, or empty array if zone not found.
+        /// </summary>
         public static IReadOnlyList<Hotspot> GetAllInZone(string zone)
         {
             if (string.IsNullOrWhiteSpace(zone))
@@ -111,12 +118,19 @@ namespace AIRefactored.AI.Hotspots
             return ByZone.TryGetValue(zone.Trim(), out var result) ? result : Array.Empty<Hotspot>();
         }
 
+        /// <summary>
+        /// Returns a random hotspot, or zero if no hotspots loaded.
+        /// </summary>
         public static Hotspot GetRandomHotspot()
         {
             int count = All.Count;
             return count == 0 ? new Hotspot(Vector3.zero, "none") : All[UnityEngine.Random.Range(0, count)];
         }
 
+        /// <summary>
+        /// Returns all hotspots within radius of position passing the filter.
+        /// The returned list is pooled and MUST be returned via TempListPool.Return().
+        /// </summary>
         public static List<Hotspot> QueryNearby(Vector3 position, float radius, Predicate<Hotspot> filter)
         {
             List<Hotspot> result = TempListPool.Rent<Hotspot>();
