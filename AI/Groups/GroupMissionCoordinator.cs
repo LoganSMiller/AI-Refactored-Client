@@ -21,6 +21,7 @@ namespace AIRefactored.AI.Groups
     {
         #region Static State
 
+        // Only persists for current raid/session. Cleared on raid end.
         private static readonly Dictionary<string, BotMissionController.MissionType> AssignedMissions =
             new Dictionary<string, BotMissionController.MissionType>(32);
 
@@ -29,7 +30,7 @@ namespace AIRefactored.AI.Groups
         #region Public API
 
         /// <summary>
-        /// Assigns a mission to a group explicitly.
+        /// Explicitly assign a mission to a group.
         /// </summary>
         public static void ForceMissionForGroup(string groupId, BotMissionController.MissionType mission)
         {
@@ -39,6 +40,7 @@ namespace AIRefactored.AI.Groups
 
         /// <summary>
         /// Gets the mission for the bot's squad, assigning if none exists.
+        /// Always returns a valid mission (never null or invalid).
         /// </summary>
         public static BotMissionController.MissionType GetMissionForGroup(BotOwner bot)
         {
@@ -94,6 +96,7 @@ namespace AIRefactored.AI.Groups
 
         #region Internal Mission Picker
 
+        // Picks a mission using map, bot profile/personality, and randomness.
         private static BotMissionController.MissionType PickMission(BotOwner bot)
         {
             float loot = 1f, fight = 1f, quest = 1f;
@@ -101,7 +104,6 @@ namespace AIRefactored.AI.Groups
             try
             {
                 string map = GameWorldHandler.TryGetValidMapName();
-
                 switch (map)
                 {
                     case "factory4_day":
@@ -125,7 +127,6 @@ namespace AIRefactored.AI.Groups
                     loot += profile.Caution;
                     quest += profile.Caution * 0.5f;
                     fight += profile.AggressionLevel * 1.3f;
-
                     if (profile.IsFrenzied) fight += 1.4f;
                     if (profile.IsFearful) loot += 1.2f;
                     if (profile.IsCamper) quest += 0.9f;

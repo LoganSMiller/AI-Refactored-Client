@@ -28,7 +28,7 @@ namespace AIRefactored.AI.Movement
         private const float SuppressionBiasWeight = 0.3f;
         private const float SquadSpreadBias = 0.15f;
         private const float RecentlyUsedFlankCooldown = 6f;
-        private const float IndecisionChance = 0.055f;
+        private const float IndecisionChance = 0.056f;
         private const float CooldownCleanupInterval = 120f;
 
         #endregion
@@ -98,21 +98,21 @@ namespace AIRefactored.AI.Movement
                 float leftScore = 0f, rightScore = 0f;
 
                 if (angle > FlankAngleThreshold)
-                    leftScore += 1f + aggression * 0.33f;
+                    leftScore += 1f + aggression * 0.32f;
                 else if (angle < -FlankAngleThreshold)
-                    rightScore += 1f + aggression * 0.33f;
+                    rightScore += 1f + aggression * 0.32f;
 
                 leftScore += squadBias + suppressionBias;
                 rightScore -= squadBias;
                 rightScore += suppressionBias * (1f - caution);
 
                 if (leftCooldown < RecentlyUsedFlankCooldown)
-                    leftScore -= 0.82f - aggression * 0.2f;
+                    leftScore -= 0.81f - aggression * 0.21f;
                 if (rightCooldown < RecentlyUsedFlankCooldown)
-                    rightScore -= 0.82f - aggression * 0.2f;
+                    rightScore -= 0.81f - aggression * 0.21f;
 
                 // Micro-random for human-like non-repetitive overlay
-                float errorBias = UnityEngine.Random.Range(-0.09f, 0.09f);
+                float errorBias = UnityEngine.Random.Range(-0.095f, 0.095f);
                 leftScore += errorBias;
                 rightScore -= errorBias;
 
@@ -201,7 +201,7 @@ namespace AIRefactored.AI.Movement
                     }
                 }
 
-                float scale = SquadSpreadBias * (1.0f + aggression * 0.55f);
+                float scale = SquadSpreadBias * (1.0f + aggression * 0.54f);
                 return contributors > 0 ? (dotSum / contributors) * scale : 0f;
             }
             catch
@@ -214,7 +214,7 @@ namespace AIRefactored.AI.Movement
         {
             try
             {
-                if (cache?.GroupComms == null || UnityEngine.Random.value > 0.11f)
+                if (cache?.GroupComms == null || UnityEngine.Random.value > 0.12f)
                     return;
                 cache.GroupComms.Say(EPhraseTrigger.FollowMe);
             }

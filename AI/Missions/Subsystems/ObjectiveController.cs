@@ -25,7 +25,7 @@ namespace AIRefactored.AI.Missions.Subsystems
 
     /// <summary>
     /// Controls *intent* and tactical routing for bot missions.
-    /// Never issues movement. All intent is for overlay/event pickup only.
+    /// Never issues real movement. All intent is for overlay/event pickup only.
     /// Bulletproof, squad broadcast-safe, pooled, never disables itself or squad.
     /// </summary>
     public sealed class ObjectiveController
@@ -67,6 +67,7 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         /// <summary>
         /// Sets initial mission objective and emits overlay intent.
+        /// Overlay/event only: no movement call here!
         /// </summary>
         public void SetInitialObjective(MissionType type)
         {
@@ -75,7 +76,6 @@ namespace AIRefactored.AI.Missions.Subsystems
                 Vector3 target = GetObjectiveTarget(type);
                 CurrentObjective = target;
                 MaybeNotifySquadObjective(target, true);
-                // Overlay/event only: no movement call here!
             }
             catch (Exception ex)
             {
@@ -85,6 +85,7 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         /// <summary>
         /// Handles logic after an objective is reached, emits next overlay move intent.
+        /// Overlay/event only: no movement call here!
         /// </summary>
         public void OnObjectiveReached(MissionType type)
         {
@@ -93,7 +94,6 @@ namespace AIRefactored.AI.Missions.Subsystems
                 Vector3 next = GetObjectiveTarget(type);
                 CurrentObjective = next;
                 MaybeNotifySquadObjective(next);
-                // Overlay/event only: no movement call here!
             }
             catch (Exception ex)
             {
@@ -103,6 +103,7 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         /// <summary>
         /// Resumes quest overlay routing after interruption.
+        /// Overlay/event only: no movement call here!
         /// </summary>
         public void ResumeQuesting()
         {
@@ -116,7 +117,6 @@ namespace AIRefactored.AI.Missions.Subsystems
                     Vector3 next = GetNextQuestObjective();
                     CurrentObjective = next;
                     MaybeNotifySquadObjective(next);
-                    // Overlay/event only: no movement call here!
                 }
             }
             catch (Exception ex)
@@ -243,6 +243,7 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         /// <summary>
         /// Optionally notifies the squad of a new objective, anti-spam and deduped.
+        /// Never triggers movement. Only overlay/event-safe comms.
         /// </summary>
         private void MaybeNotifySquadObjective(Vector3 obj, bool force = false)
         {
@@ -255,7 +256,7 @@ namespace AIRefactored.AI.Missions.Subsystems
             {
                 _lastBroadcastedObjective = obj;
                 _lastBroadcastTime = now;
-                // Add group comms/event logic here as needed (never triggers movement).
+                // Place overlay/event-only group comms logic here.
             }
         }
 

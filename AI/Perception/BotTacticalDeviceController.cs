@@ -34,6 +34,9 @@ namespace AIRefactored.AI.Perception
 
         #region Initialization
 
+        /// <summary>
+        /// Initializes the device controller for a bot (overlay/event-only).
+        /// </summary>
         public void Initialize(BotComponentCache cache)
         {
             _failed = false;
@@ -96,7 +99,7 @@ namespace AIRefactored.AI.Perception
                         }
                     }
 
-                    // Chaos-baiting: rapid off-on flash for human-style bait/fake
+                    // Chaos-baiting: brief off-on flash for human-style fakeout
                     if (baitTrigger)
                     {
                         _nextDecisionTime = Time.time + 1.5f;
@@ -124,6 +127,9 @@ namespace AIRefactored.AI.Perception
 
         #region Logic
 
+        /// <summary>
+        /// Returns true if bot is alive, valid, and ready for device logic.
+        /// </summary>
         private bool CanThink()
         {
             return !_failed &&
@@ -136,7 +142,7 @@ namespace AIRefactored.AI.Perception
         }
 
         /// <summary>
-        /// Returns chaos-bait trigger chance (personality driven, awareness-inverse).
+        /// Returns chaos-bait trigger chance (personality-driven, awareness-inverse).
         /// </summary>
         private float GetChaosBaitChance()
         {
@@ -176,7 +182,7 @@ namespace AIRefactored.AI.Perception
         }
 
         /// <summary>
-        /// Finds all attached tactical devices (light/laser/nvg/thermal) on the weapon, zero-alloc.
+        /// Finds all attached tactical devices (light/laser/nvg/thermal) on the weapon, pooled/zero-alloc.
         /// </summary>
         private static void ScanModsForTacticalDevices(Weapon weapon, System.Collections.Generic.List<LightComponent> result)
         {

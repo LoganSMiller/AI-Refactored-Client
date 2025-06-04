@@ -96,7 +96,7 @@ namespace AIRefactored.AI.Missions
                     _lastExtractDecisionTime = now;
                     ExtractionIntentTarget = FindExtractionIntentTarget();
                     _hasExtracted = ExtractionIntentTarget != Vector3.zero;
-                    // The overlay/dispatcher must pick up ExtractionIntentTarget and route real moves.
+                    // Overlay/dispatcher must pick up ExtractionIntentTarget and route real moves.
                     _cache?.TacticalMemory?.MarkForcedExtract();
                 }
             }

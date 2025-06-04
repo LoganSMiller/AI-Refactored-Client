@@ -54,6 +54,9 @@ namespace AIRefactored.AI.Perception
 
         #region Initialization
 
+        /// <summary>
+        /// Overlay/event-only. Must be called from BotBrain overlay tick. Never per-frame.
+        /// </summary>
         public void Initialize(BotComponentCache cache)
         {
             try
@@ -82,6 +85,9 @@ namespace AIRefactored.AI.Perception
 
         #region Tick
 
+        /// <summary>
+        /// Overlay/event-only. Called from BotBrain overlay tick. Never per-frame.
+        /// </summary>
         public void Tick(float time)
         {
             if (_failed || !IsValid())
@@ -147,8 +153,9 @@ namespace AIRefactored.AI.Perception
                             bestTarget = p;
                         }
                     }
-                    else if ((inCone || close) && !canSee && !FikaHeadlessDetector.IsHeadless)
+                    else if ((inCone || close) && !canSee)
                     {
+                        // Overlay-only: speech, never triggers pose or movement
                         _bot.BotTalk?.TrySay(EPhraseTrigger.OnBeingHurt);
                     }
                 }
@@ -215,10 +222,8 @@ namespace AIRefactored.AI.Perception
                 _bot.BotsGroup.AddEnemy(enemy, EBotEnemyCause.addPlayer);
                 _lastCommitTime = time;
 
-                if (!FikaHeadlessDetector.IsHeadless)
-                {
-                    _bot.BotTalk?.TrySay(EPhraseTrigger.OnEnemyConversation);
-                }
+                // Overlay/event-only: no client/headless gating, no movement
+                _bot.BotTalk?.TrySay(EPhraseTrigger.OnEnemyConversation);
             }
             catch (Exception ex)
             {

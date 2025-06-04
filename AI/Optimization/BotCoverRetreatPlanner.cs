@@ -6,292 +6,335 @@
 
 namespace AIRefactored.AI.Optimization
 {
-	using System;
-	using System.Collections.Generic;
-	using AIRefactored.AI.Core;
-	using AIRefactored.AI.Helpers;
-	using AIRefactored.AI.Navigation;
-	using AIRefactored.Core;
-	using AIRefactored.Pools;
-	using EFT;
-	using UnityEngine;
-	using UnityEngine.AI;
+    using System;
+    using System.Collections.Generic;
+    using AIRefactored.AI.Core;
+    using AIRefactored.AI.Helpers;
+    using AIRefactored.AI.Navigation;
+    using AIRefactored.Core;
+    using AIRefactored.Pools;
+    using EFT;
+    using UnityEngine;
+    using UnityEngine.AI;
 
-	/// <summary>
-	/// Ultra-realistic, squad-aware cover/fallback/retreat planner for AIRefactored bots.
-	/// Caches squad/group retreat overlays, applies chaos/personality modifiers, and ensures zero allocation in hot path.
-	/// All pathfinding is handled by overlay/global helper (BotMovementHelper/BotNavHelper).
-	/// </summary>
-	public sealed class BotCoverRetreatPlanner
-	{
-		#region Constants
+    /// <summary>
+    /// Ultra-realistic, squad-aware cover/fallback/retreat planner for AIRefactored bots.
+    /// Caches squad/group retreat overlays, applies chaos/personality modifiers, and ensures zero allocation in hot path.
+    /// All pathfinding is handled by overlay/global helper (BotMovementHelper/BotNavHelper).
+    /// Never issues a move or path—outputs overlays/intents only.
+    /// </summary>
+    public sealed class BotCoverRetreatPlanner
+    {
+        #region Constants
 
-		private const float SquadSpacingThreshold = 4.25f;
-		private const float MemoryClearInterval = 61f;
-		private const float ChaosOffsetRadius = 2.5f;
-		private const float CoverProbeRadius = 4.2f;
-		private const int CoverProbeRays = 10;
-		private const float CoverCheckInterval = 0.23f;
-		private const float CoverPersistTime = 0.67f;
+        private const float SquadSpacingThreshold = 4.25f;
+        private const float MemoryClearInterval = 61f;
+        private const float ChaosOffsetRadius = 2.5f;
+        private const float CoverProbeRadius = 4.2f;
+        private const int CoverProbeRays = 10;
+        private const float CoverCheckInterval = 0.23f;
+        private const float CoverPersistTime = 0.67f;
+        private const float NavSampleRadius = 1.5f;
 
-		#endregion
+        #endregion
 
-		#region Static Pool and Cache
+        #region Static Pool and Cache
 
-		private static readonly Dictionary<string, Dictionary<string, List<Vector3>>> _squadRetreatCache =
-			new Dictionary<string, Dictionary<string, List<Vector3>>>();
-		private static float _lastClearTime = -999f;
+        private static readonly Dictionary<string, Dictionary<string, List<Vector3>>> _squadRetreatCache =
+            new Dictionary<string, Dictionary<string, List<Vector3>>>();
+        private static float _lastClearTime = -999f;
 
-		#endregion
+        #endregion
 
-		#region Fields
+        #region Fields
 
-		private readonly BotOwner _bot;
-		private float _lastCoverCheckTime;
-		private bool _isInCover;
-		private Vector3 _coverNormal;
-		private float _coverLastFoundTime;
-		private int _coverMisses;
+        private readonly BotOwner _bot;
+        private float _lastCoverCheckTime;
+        private bool _isInCover;
+        private Vector3 _coverNormal;
+        private float _coverLastFoundTime;
+        private int _coverMisses;
 
-		#endregion
+        #endregion
 
-		#region Construction
+        #region Construction
 
-		public BotCoverRetreatPlanner(BotOwner bot)
-		{
-			_bot = bot ?? throw new ArgumentNullException(nameof(bot));
-			_lastCoverCheckTime = -999f;
-			_coverNormal = Vector3.zero;
-			_coverLastFoundTime = -999f;
-			_coverMisses = 0;
-			_isInCover = false;
-		}
+        /// <summary>
+        /// Create a cover/retreat planner for a bot.
+        /// </summary>
+        public BotCoverRetreatPlanner(BotOwner bot)
+        {
+            _bot = bot ?? throw new ArgumentNullException(nameof(bot));
+            _lastCoverCheckTime = -999f;
+            _coverNormal = Vector3.zero;
+            _coverLastFoundTime = -999f;
+            _coverMisses = 0;
+            _isInCover = false;
+        }
 
-		#endregion
+        #endregion
 
-		#region Properties
+        #region Properties
 
-		/// <summary>
-		/// True if the bot is currently considered to be in cover (with hysteresis).
-		/// </summary>
-		public bool IsInCover
-		{
-			get
-			{
-				float now = Time.time;
-				return _isInCover && now - _coverLastFoundTime < CoverPersistTime;
-			}
-		}
+        /// <summary>
+        /// True if the bot is currently considered to be in cover (with hysteresis).
+        /// </summary>
+        public bool IsInCover
+        {
+            get
+            {
+                float now = Time.time;
+                return _isInCover && now - _coverLastFoundTime < CoverPersistTime;
+            }
+        }
 
-		/// <summary>
-		/// Returns the last found cover normal (world space).
-		/// </summary>
-		public Vector3 CoverNormal => _coverNormal;
+        /// <summary>
+        /// Returns the last found cover normal (world space).
+        /// </summary>
+        public Vector3 CoverNormal => _coverNormal;
 
-		#endregion
+        #endregion
 
-		#region Static Init
+        #region Static Init
 
-		/// <summary>
-		/// Clears all retreat caches; use on world load.
-		/// </summary>
-		public static void InitializeStatic()
-		{
-			try
-			{
-				_squadRetreatCache.Clear();
-				_lastClearTime = Time.time;
-			}
-			catch (Exception ex)
-			{
-				Plugin.LoggerInstance.LogError("[BotCoverRetreatPlanner] Initialize failed: " + ex);
-			}
-		}
+        /// <summary>
+        /// Clears all retreat caches; use on world load.
+        /// </summary>
+        public static void InitializeStatic()
+        {
+            try
+            {
+                _squadRetreatCache.Clear();
+                _lastClearTime = Time.time;
+            }
+            catch (Exception ex)
+            {
+                Plugin.LoggerInstance.LogError("[BotCoverRetreatPlanner] Initialize failed: " + ex);
+            }
+        }
 
-		#endregion
+        #endregion
 
-		#region Main Public API
+        #region Main Public API
 
-		/// <summary>
-		/// Event-only: Requests a squad-safe retreat/fallback path from the overlay helper, caches/returns the squad path if valid.
-		/// Never builds a path directly—only caches and overlays group/chaos effects.
-		/// </summary>
-		public List<Vector3> GetCoverRetreatPath(Vector3 threatDir)
-		{
-			List<Vector3> result = TempListPool.Rent<Vector3>();
-			try
-			{
-				if (!GameWorldHandler.IsLocalHost() || _bot == null || _bot.Transform == null)
-					return result;
+        /// <summary>
+        /// Event/overlay-only: Requests a squad-safe retreat/fallback path from overlay helpers.
+        /// Returns only overlays/intents (never builds path, never issues a move).
+        /// All results are NavMesh-sampled and pooled. Bulletproof.
+        /// </summary>
+        public List<Vector3> GetCoverRetreatPath(Vector3 threatDir)
+        {
+            var result = TempListPool.Rent<Vector3>();
+            try
+            {
+                if (!GameWorldHandler.IsLocalHost() || _bot == null || _bot.Transform == null)
+                    return result;
 
-				string map = GameWorldHandler.TryGetValidMapName();
-				if (string.IsNullOrEmpty(map))
-					return result;
+                string map = GameWorldHandler.TryGetValidMapName();
+                if (string.IsNullOrEmpty(map))
+                    return result;
 
-				ClearExpiredCache();
+                ClearExpiredCache();
 
-				string squadId = _bot.Profile?.Info?.GroupId ?? _bot.ProfileId;
-				if (!_squadRetreatCache.TryGetValue(map, out var squadCache))
-				{
-					squadCache = new Dictionary<string, List<Vector3>>();
-					_squadRetreatCache[map] = squadCache;
-				}
+                string squadId = _bot.Profile?.Info?.GroupId ?? _bot.ProfileId;
+                if (!_squadRetreatCache.TryGetValue(map, out var squadCache))
+                {
+                    squadCache = new Dictionary<string, List<Vector3>>();
+                    _squadRetreatCache[map] = squadCache;
+                }
 
-				// 1. Try squad cache (must be overlay result, never direct path)
-				if (squadCache.TryGetValue(squadId, out var cached) &&
-					cached.Count >= 2 && !SquadOverlapCheck(cached))
-				{
-					result.AddRange(cached);
-					return result;
-				}
-				squadCache.Remove(squadId);
+                // Try squad cache (overlay result only, never direct path)
+                if (squadCache.TryGetValue(squadId, out var cached) &&
+                    cached.Count >= 2 && !SquadOverlapCheck(cached))
+                {
+                    result.AddRange(cached);
+                    return result;
+                }
+                squadCache.Remove(squadId);
 
-				// 2. Ask overlay/helper for a squad-safe fallback path (overlay only!)
-				List<Vector3> overlayPath = BotMovementHelper.GetSquadSafeRetreatPath(_bot, threatDir, SquadSpacingThreshold);
-				if (overlayPath != null && overlayPath.Count >= 2)
-				{
-					ApplyChaosOffset(overlayPath, _bot, threatDir);
-					squadCache[squadId] = overlayPath;
-					result.AddRange(overlayPath);
-					return result;
-				}
+                // Ask overlay/helper for a squad-safe fallback path (overlay only)
+                List<Vector3> overlayPath = BotMovementHelper.GetSquadSafeRetreatPath(_bot, threatDir, SquadSpacingThreshold);
+                if (overlayPath != null && overlayPath.Count >= 2)
+                {
+                    ApplyChaosOffset(overlayPath, _bot, threatDir);
+                    for (int i = 0; i < overlayPath.Count; i++)
+                    {
+                        Vector3 navSafe;
+                        if (NavMesh.SamplePosition(overlayPath[i], out NavMeshHit navHit, NavSampleRadius, NavMesh.AllAreas))
+                        {
+                            navSafe = navHit.position;
+                            if (Mathf.Abs(navSafe.y - _bot.Position.y) > 3.0f)
+                                navSafe.y = _bot.Position.y;
+                            overlayPath[i] = navSafe;
+                        }
+                        else
+                        {
+                            // If sampling fails, drop the point
+                            overlayPath[i] = overlayPath[Mathf.Max(0, i - 1)];
+                        }
+                    }
+                    squadCache[squadId] = overlayPath;
+                    result.AddRange(overlayPath);
+                    return result;
+                }
 
-				// 3. If overlay returned nothing, just return a safe pair [origin, fallback] (never build a path)
-				Vector3 origin = _bot.Position;
-				Vector3 fallback = origin - threatDir.normalized * 8f;
-				result.Add(origin);
-				result.Add(fallback);
-				return result;
-			}
-			catch (Exception ex)
-			{
-				Plugin.LoggerInstance.LogError("[BotCoverRetreatPlanner] GetCoverRetreatPath failed: " + ex);
-				return result;
-			}
-		}
+                // Fallback: Always provide a NavMesh-safe overlay fallback (never direct vector)
+                Vector3 origin = _bot.Position;
+                Vector3 fallback = origin - threatDir.normalized * 8f;
+                Vector3 navSafeOrigin = NavMeshSampleSafe(origin, _bot.Position);
+                Vector3 navSafeFallback = NavMeshSampleSafe(fallback, _bot.Position);
+                result.Add(navSafeOrigin);
+                result.Add(navSafeFallback);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Plugin.LoggerInstance.LogError("[BotCoverRetreatPlanner] GetCoverRetreatPath failed: " + ex);
+                return result;
+            }
+        }
 
-		/// <summary>
-		/// Throttled, hysteresis-based cover probe. Probes cover at intervals, persists "in cover" state, flicker-free.
-		/// </summary>
-		public bool TryGetBestCoverNear(Vector3 target, Vector3 current, out Vector3 coverPoint)
-		{
-			coverPoint = Vector3.zero;
-			float now = Time.time;
-			bool foundCover = false;
-			Vector3 foundNormal = Vector3.zero;
+        /// <summary>
+        /// Hysteresis-based, throttled cover probe. All output is NavMesh-sampled, pooled, flicker-free.
+        /// </summary>
+        public bool TryGetBestCoverNear(Vector3 target, Vector3 current, out Vector3 coverPoint)
+        {
+            coverPoint = Vector3.zero;
+            float now = Time.time;
+            bool foundCover = false;
+            Vector3 foundNormal = Vector3.zero;
 
-			if (now - _lastCoverCheckTime < CoverCheckInterval)
-			{
-				if (_isInCover)
-				{
-					coverPoint = current + _coverNormal * 1.25f;
-					return true;
-				}
-				return false;
-			}
-			_lastCoverCheckTime = now;
+            if (now - _lastCoverCheckTime < CoverCheckInterval)
+            {
+                if (_isInCover)
+                {
+                    coverPoint = NavMeshSampleSafe(current + _coverNormal * 1.25f, current);
+                    return true;
+                }
+                return false;
+            }
+            _lastCoverCheckTime = now;
 
-			float bestScore = float.MinValue;
-			Vector3 best = Vector3.zero;
-			Vector3 bestNormal = Vector3.zero;
-			Vector3 directionToTarget = (target - current).normalized;
+            float bestScore = float.MinValue;
+            Vector3 best = Vector3.zero;
+            Vector3 bestNormal = Vector3.zero;
+            Vector3 directionToTarget = (target - current).normalized;
 
-			for (int i = 0; i < CoverProbeRays; i++)
-			{
-				float angle = (360f / CoverProbeRays) * i;
-				Vector3 dir = Quaternion.Euler(0f, angle, 0f) * -directionToTarget;
-				Vector3 probe = current + dir * CoverProbeRadius;
+            for (int i = 0; i < CoverProbeRays; i++)
+            {
+                float angle = (360f / CoverProbeRays) * i;
+                Vector3 dir = Quaternion.Euler(0f, angle, 0f) * -directionToTarget;
+                Vector3 probe = current + dir * CoverProbeRadius;
 
-				if (NavMesh.SamplePosition(probe, out NavMeshHit navHit, 2.0f, NavMesh.AllAreas))
-				{
-					float score = Vector3.Dot(dir, -directionToTarget) * 1.7f - Vector3.Distance(current, navHit.position) * 0.25f;
-					Vector3 eye = navHit.position + Vector3.up * 1.4f;
-					Vector3 toThreat = (target - navHit.position).normalized;
-					Vector3 normal = Vector3.zero;
+                if (NavMesh.SamplePosition(probe, out NavMeshHit navHit, 2.0f, NavMesh.AllAreas))
+                {
+                    float score = Vector3.Dot(dir, -directionToTarget) * 1.7f - Vector3.Distance(current, navHit.position) * 0.25f;
+                    Vector3 eye = navHit.position + Vector3.up * 1.4f;
+                    Vector3 toThreat = (target - navHit.position).normalized;
+                    Vector3 normal = Vector3.zero;
 
-					if (Physics.Raycast(eye, toThreat, out RaycastHit hit, Vector3.Distance(navHit.position, target), AIRefactoredLayerMasks.CoverColliderMask))
-					{
-						score += 2.5f;
-						normal = hit.normal;
-					}
-					if (score > bestScore)
-					{
-						bestScore = score;
-						best = navHit.position;
-						bestNormal = normal != Vector3.zero ? normal : dir;
-						foundCover = true;
-					}
-				}
-			}
-			// Hysteresis: only lose cover after multiple misses
-			if (foundCover && bestScore > float.MinValue + 0.4f)
-			{
-				_isInCover = true;
-				_coverLastFoundTime = now;
-				_coverNormal = bestNormal.normalized;
-				_coverMisses = 0;
-				coverPoint = best;
-				return true;
-			}
-			else
-			{
-				_coverMisses++;
-				if (_coverMisses >= 2)
-				{
-					_isInCover = false;
-					_coverNormal = Vector3.zero;
-				}
-				coverPoint = Vector3.zero;
-				return false;
-			}
-		}
+                    if (Physics.Raycast(eye, toThreat, out RaycastHit hit, Vector3.Distance(navHit.position, target), AIRefactoredLayerMasks.CoverColliderMask))
+                    {
+                        score += 2.5f;
+                        normal = hit.normal;
+                    }
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        best = navHit.position;
+                        bestNormal = normal != Vector3.zero ? normal : dir;
+                        foundCover = true;
+                    }
+                }
+            }
+            // Hysteresis: only lose cover after multiple misses
+            if (foundCover && bestScore > float.MinValue + 0.4f)
+            {
+                _isInCover = true;
+                _coverLastFoundTime = now;
+                _coverNormal = bestNormal.normalized;
+                _coverMisses = 0;
+                coverPoint = NavMeshSampleSafe(best, current);
+                return true;
+            }
+            else
+            {
+                _coverMisses++;
+                if (_coverMisses >= 2)
+                {
+                    _isInCover = false;
+                    _coverNormal = Vector3.zero;
+                }
+                coverPoint = Vector3.zero;
+                return false;
+            }
+        }
 
-		#endregion
+        #endregion
 
-		#region Helpers
+        #region Helpers
 
-		private static void ClearExpiredCache()
-		{
-			if (Time.time - _lastClearTime > MemoryClearInterval)
-			{
-				_squadRetreatCache.Clear();
-				_lastClearTime = Time.time;
-			}
-		}
+        private static void ClearExpiredCache()
+        {
+            if (Time.time - _lastClearTime > MemoryClearInterval)
+            {
+                _squadRetreatCache.Clear();
+                _lastClearTime = Time.time;
+            }
+        }
 
-		private static bool SquadOverlapCheck(List<Vector3> path)
-		{
-			// Placeholder for advanced runtime overlap logic.
-			return false;
-		}
+        private static bool SquadOverlapCheck(List<Vector3> path)
+        {
+            // Placeholder for future: runtime squad path overlap checks
+            return false;
+        }
 
-		private static void ApplyChaosOffset(List<Vector3> path, BotOwner bot, Vector3 threatDir)
-		{
-			if (path == null || path.Count == 0 || bot == null)
-				return;
+        private static void ApplyChaosOffset(List<Vector3> path, BotOwner bot, Vector3 threatDir)
+        {
+            if (path == null || path.Count == 0 || bot == null)
+                return;
 
-			var cache = bot.GetComponent<BotComponentCache>();
-			if (cache == null)
-				return;
+            var cache = bot.GetComponent<BotComponentCache>();
+            if (cache == null)
+                return;
 
-			var profile = cache.PersonalityProfile ?? BotRegistry.GetOrGenerate(bot.ProfileId, PersonalityType.Balanced, bot.Profile?.Info?.Settings?.Role ?? WildSpawnType.assault);
+            var profile = cache.PersonalityProfile ?? BotRegistry.GetOrGenerate(
+                bot.ProfileId,
+                PersonalityType.Balanced,
+                bot.Profile?.Info?.Settings?.Role ?? WildSpawnType.assault);
 
-			float chaosMul = 1f;
-			if (cache.PanicHandler != null && cache.PanicHandler.IsPanicking)
-				chaosMul += 0.8f;
-			if (cache.Suppression != null && cache.Suppression.IsSuppressed())
-				chaosMul += 0.45f;
-			chaosMul += (1f - Mathf.Clamp01(profile.Caution)) * 0.2f;
+            float chaosMul = 1f;
+            if (cache.PanicHandler != null && cache.PanicHandler.IsPanicking)
+                chaosMul += 0.8f;
+            if (cache.Suppression != null && cache.Suppression.IsSuppressed())
+                chaosMul += 0.45f;
+            chaosMul += (1f - Mathf.Clamp01(profile.Caution)) * 0.2f;
 
-			for (int i = 1; i < path.Count; i++)
-			{
-				float chaos = ChaosOffsetRadius * chaosMul * UnityEngine.Random.Range(0.8f, 1.15f);
-				Vector3 offset = UnityEngine.Random.insideUnitSphere * chaos;
-				offset.y = 0f;
-				path[i] += offset;
-			}
-		}
+            for (int i = 1; i < path.Count; i++)
+            {
+                float chaos = ChaosOffsetRadius * chaosMul * UnityEngine.Random.Range(0.8f, 1.15f);
+                Vector3 offset = UnityEngine.Random.insideUnitSphere * chaos;
+                offset.y = 0f;
+                path[i] += offset;
+            }
+        }
 
-		#endregion
-	}
+        /// <summary>
+        /// Fully NavMesh-sample and Y-clamp a given point; fallback to fallbackOrigin if invalid.
+        /// </summary>
+        private static Vector3 NavMeshSampleSafe(Vector3 candidate, Vector3 fallbackOrigin)
+        {
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit navHit, NavSampleRadius, NavMesh.AllAreas))
+            {
+                Vector3 navSafe = navHit.position;
+                if (Mathf.Abs(navSafe.y - fallbackOrigin.y) > 3.0f)
+                    navSafe.y = fallbackOrigin.y;
+                return navSafe;
+            }
+            // Always fallback to origin if sampling fails
+            return fallbackOrigin;
+        }
+
+        #endregion
+    }
 }

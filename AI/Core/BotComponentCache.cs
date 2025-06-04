@@ -27,6 +27,10 @@ namespace AIRefactored.AI.Core
     using EFT;
     using UnityEngine;
 
+    /// <summary>
+    /// Canonical cache for all AIRefactored bot subsystems. All movement and overlay/intent logic
+    /// is strictly pooled, deduped, and never disables. Fully SPT/FIKA/headless safe.
+    /// </summary>
     public sealed class BotComponentCache : IDisposable
     {
         #region Static
@@ -119,6 +123,9 @@ namespace AIRefactored.AI.Core
 
         #region Initialization
 
+        /// <summary>
+        /// Initializes all AIRefactored subsystems, strictly pooled and overlay/movement safe.
+        /// </summary>
         public void Initialize(BotOwner bot)
         {
             if (bot == null)
@@ -222,6 +229,9 @@ namespace AIRefactored.AI.Core
             _owner = owner;
         }
 
+        /// <summary>
+        /// Registers an auditory event (e.g. gunshot, footstep) for direction-aware overlay logic.
+        /// </summary>
         public void RegisterHeardSound(Vector3 source)
         {
             if (Bot == null) return;
@@ -230,6 +240,9 @@ namespace AIRefactored.AI.Core
             HasHeardDirection = true;
         }
 
+        /// <summary>
+        /// Fully disposes movement/overlay pools, releasing pooled references.
+        /// </summary>
         public void Dispose()
         {
             try { _fallbackHandler?.Dispose(); }

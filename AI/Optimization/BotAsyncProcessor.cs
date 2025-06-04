@@ -63,7 +63,7 @@ namespace AIRefactored.AI.Optimization
                 _hasInitialized = false;
                 _lastThinkTime = 0f;
 
-                // Event-only async logic, never polled/ticked.
+                // Overlay/event-only async logic, never polled/ticked.
                 Task.Run(async () =>
                 {
                     try

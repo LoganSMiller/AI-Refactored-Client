@@ -43,9 +43,6 @@ namespace AIRefactored.AI.Groups
 
         #region Initialization
 
-        /// <summary>
-        /// Must be called once per bot after creation/raid join.
-        /// </summary>
         public void Initialize(BotComponentCache cache)
         {
             if (cache == null || cache.Bot == null || cache.Bot.IsDead)
@@ -53,16 +50,13 @@ namespace AIRefactored.AI.Groups
                 Reset();
                 return;
             }
-
             _bot = cache.Bot;
             _group = _bot.BotsGroup;
-
             if (_group == null || _group.MembersCount < 2)
             {
                 Reset();
                 return;
             }
-
             _offsetInitialized = false;
             _lastGroupSize = -1;
             _cachedOffset = Vector3.zero;
@@ -87,9 +81,6 @@ namespace AIRefactored.AI.Groups
 
         #region Tick
 
-        /// <summary>
-        /// Tick externally from BotBrain. Recomputes formation and drift on squad size change or drift interval.
-        /// </summary>
         public void Tick(float deltaTime)
         {
             if (_bot == null || _group == null || _bot.IsDead || _group.MembersCount < 2)
@@ -111,18 +102,12 @@ namespace AIRefactored.AI.Groups
 
         #region Offset API
 
-        /// <summary>
-        /// Applies this bot's squad offset to the specified vector.
-        /// </summary>
         public Vector3 ApplyOffsetTo(Vector3 target)
         {
             Vector3 off = GetCurrentOffset();
             return IsVectorValid(off) ? target + off : target;
         }
 
-        /// <summary>
-        /// Gets the current squad offset for this bot, including live drift.
-        /// </summary>
         public Vector3 GetCurrentOffset()
         {
             Vector3 sum = _cachedOffset + new Vector3(_driftOffset.x, 0f, _driftOffset.y);

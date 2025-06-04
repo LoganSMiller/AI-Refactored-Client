@@ -40,71 +40,71 @@ namespace AIRefactored.Runtime
 			{
 				Reset();
 				_hasLoggedReset = false;
-				Logger.LogDebug("[DeadBodyObserver] ✅ Initialized.");
-			}
-			catch (Exception ex)
-			{
-				Logger.LogError("[DeadBodyObserver] ❌ Initialize failed: " + ex);
-			}
-		}
+                Logger.LogDebug("[DeadBodyObserver] ✅ Initialized.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("[DeadBodyObserver] ❌ Initialize failed: " + ex);
+            }
+        }
 
-		public void OnRaidEnd()
-		{
-			try
-			{
-				Reset();
-				Logger.LogDebug("[DeadBodyObserver] 🧹 Reset after raid.");
-			}
-			catch (Exception ex)
-			{
-				Logger.LogError("[DeadBodyObserver] ❌ OnRaidEnd error: " + ex);
-			}
-		}
+        public void OnRaidEnd()
+        {
+            try
+            {
+                Reset();
+                Logger.LogDebug("[DeadBodyObserver] 🧹 Reset after raid.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("[DeadBodyObserver] ❌ OnRaidEnd error: " + ex);
+            }
+        }
 
-		public bool IsReady() => true;
+        public bool IsReady() => true;
 
-		public WorldPhase RequiredPhase() => WorldPhase.WorldReady;
+        public WorldPhase RequiredPhase() => WorldPhase.WorldReady;
 
-		public static void Reset()
-		{
-			if (_hasLoggedReset)
-				return;
+        public static void Reset()
+        {
+            _nextScanTime = -1f;
 
-			_nextScanTime = -1f;
-			_hasLoggedReset = true;
+            if (_hasLoggedReset)
+                return;
 
-			try
-			{
-				Logger.LogDebug("[DeadBodyObserver] 🔄 Reset complete.");
-			}
-			catch { }
-		}
+            _hasLoggedReset = true;
 
-		public void Tick(float deltaTime)
-		{
-			try
-			{
-				if (!Application.isPlaying || !GameWorldHandler.IsInitialized || !GameWorldHandler.IsHost || !GameWorldHandler.IsReady())
-					return;
+            try
+            {
+                Logger.LogDebug("[DeadBodyObserver] 🔄 Reset complete.");
+            }
+            catch { }
+        }
 
-				float now = Time.time;
-				if (now < _nextScanTime)
-					return;
+        public void Tick(float deltaTime)
+        {
+            try
+            {
+                if (!Application.isPlaying || !GameWorldHandler.IsInitialized || !GameWorldHandler.IsHost || !GameWorldHandler.IsReady())
+                    return;
 
-				_nextScanTime = now + ScanIntervalSeconds;
+                float now = Time.time;
+                if (now < _nextScanTime)
+                    return;
 
-				GameWorld world = GameWorldHandler.Get();
-				if (world == null || world.RegisteredPlayers == null || world.RegisteredPlayers.Count == 0)
-					return;
+                _nextScanTime = now + ScanIntervalSeconds;
 
-				LootableContainer[] containers = UnityEngine.Object.FindObjectsOfType<LootableContainer>();
-				if (containers == null || containers.Length == 0)
-					return;
+                GameWorld world = GameWorldHandler.Get();
+                if (world == null || world.RegisteredPlayers == null || world.RegisteredPlayers.Count == 0)
+                    return;
 
-				List<IPlayer> rawPlayers = world.RegisteredPlayers;
-				List<Player> deadPlayers = TempListPool.Rent<Player>();
+                LootableContainer[] containers = UnityEngine.Object.FindObjectsOfType<LootableContainer>();
+                if (containers == null || containers.Length == 0)
+                    return;
 
-				try
+                List<IPlayer> rawPlayers = world.RegisteredPlayers;
+                List<Player> deadPlayers = TempListPool.Rent<Player>();
+                try
 				{
 					for (int i = 0; i < rawPlayers.Count; i++)
 					{

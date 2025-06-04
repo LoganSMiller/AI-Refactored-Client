@@ -19,7 +19,7 @@ namespace AIRefactored.AI.Looting
 
     /// <summary>
     /// Scans for loot containers, evaluates value, arbitrates squad loot, and surfaces loot positions.
-    /// 100% tick-driven, pooled, and squad-aware. No hot path allocation, no fallback disables.
+    /// 100% tick-driven, pooled, squad-aware. No hot path allocation, no fallback disables.
     /// </summary>
     public sealed class BotLootScanner
     {

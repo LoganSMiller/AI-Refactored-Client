@@ -18,11 +18,14 @@ namespace AIRefactored.AI.Perception
     using UnityEngine;
 
     /// <summary>
-    /// Squad-aware, humanized bot hearing—personality, stance, caution, environment.
-    /// Null-safe, pooled, multiplayer/headless, only ticked by BotBrain (overlay/event-only).
+    /// Squad-aware, humanized bot hearing—personality, stance, caution, and environmental noise.
+    /// Overlay/event-only, null-safe, pooled, multiplayer/headless compliant. Ticked only by BotBrain.
+    /// Never triggers movement, teleport, or direct action—data only.
     /// </summary>
     public sealed class BotHearingSystem
     {
+        #region Constants
+
         private const float BaseHearingRange = 35f;
         private const float TimeWindow = 3f;
         private const float MinScanJitter = -0.45f;
@@ -30,10 +33,18 @@ namespace AIRefactored.AI.Perception
         private const float MinEffectiveRange = 15f;
         private const float MaxEffectiveRange = 55f;
 
+        #endregion
+
+        #region Fields
+
         private BotOwner _bot;
         private BotComponentCache _cache;
         private float _nextScanTime;
         private float _personalScanJitter;
+
+        #endregion
+
+        #region Initialization
 
         /// <summary>
         /// Overlay/event-only. Must be called from BotBrain. No background tick.
@@ -59,6 +70,10 @@ namespace AIRefactored.AI.Perception
             _nextScanTime = Time.time + 1f + _personalScanJitter;
         }
 
+        #endregion
+
+        #region Overlay/Event Tick
+
         /// <summary>
         /// Overlay/event-only: Called ONLY from BotBrain on overlay tick. Never per-frame.
         /// </summary>
@@ -72,9 +87,10 @@ namespace AIRefactored.AI.Perception
                 float now = Time.time;
                 if (now < _nextScanTime) return;
 
-                float hearingRange = GetEffectiveHearingRange(_bot, _cache);
+                // Next scan interval is irregular (prevents robotic cadence).
                 _nextScanTime = now + UnityEngine.Random.Range(1.4f, 2.1f) + _personalScanJitter;
 
+                float hearingRange = GetEffectiveHearingRange(_bot, _cache);
                 Vector3 origin = _bot.Position;
                 float rangeSqr = hearingRange * hearingRange;
 
@@ -92,7 +108,7 @@ namespace AIRefactored.AI.Perception
                         {
                             Vector3 pos = EFTPlayerUtil.GetPosition(candidate);
                             if (pos.sqrMagnitude > 0.01f)
-                                _cache.RegisterHeardSound(pos); // Overlay/event-only, never triggers direct movement
+                                _cache.RegisterHeardSound(pos); // Overlay/event-only, never direct movement
                         }
                     }
                 }
@@ -108,6 +124,13 @@ namespace AIRefactored.AI.Perception
             }
         }
 
+        #endregion
+
+        #region Private Helpers
+
+        /// <summary>
+        /// Defensive full reset; called on any logic error.
+        /// </summary>
         private void Reset()
         {
             _bot = null;
@@ -116,6 +139,9 @@ namespace AIRefactored.AI.Perception
             _personalScanJitter = 0f;
         }
 
+        /// <summary>
+        /// Fully safe and ready for overlay hearing logic.
+        /// </summary>
         private bool IsActive()
         {
             return _bot != null
@@ -126,6 +152,9 @@ namespace AIRefactored.AI.Perception
                 && !_cache.PanicHandler.IsPanicking;
         }
 
+        /// <summary>
+        /// True if bot would detect a sound from this player (fire or step).
+        /// </summary>
         private bool HeardSomething(Player source)
         {
             return source != null
@@ -133,6 +162,9 @@ namespace AIRefactored.AI.Perception
                     BotSoundUtils.DidStepRecently(_bot, source, 1f, TimeWindow));
         }
 
+        /// <summary>
+        /// Squad, self, and range checks for hearing.
+        /// </summary>
         private bool IsAudibleSource(Player candidate, Vector3 origin, float rangeSqr)
         {
             if (!EFTPlayerUtil.IsValid(candidate)) return false;
@@ -145,6 +177,9 @@ namespace AIRefactored.AI.Perception
             return (pos - origin).sqrMagnitude <= rangeSqr;
         }
 
+        /// <summary>
+        /// True if players are living members of the same squad (filters own group for realism).
+        /// </summary>
         private static bool IsSameActiveSquad(Player a, Player b)
         {
             if (a == null || b == null) return false;
@@ -154,6 +189,9 @@ namespace AIRefactored.AI.Perception
                 && b.HealthController != null && b.HealthController.IsAlive;
         }
 
+        /// <summary>
+        /// Computes the effective hearing range for this bot, including personality, stance, caution, and environmental noise.
+        /// </summary>
         private static float GetEffectiveHearingRange(BotOwner bot, BotComponentCache cache)
         {
             float awareness = 0.5f, hearing = 0.5f, caution = 0.5f, stanceBias = 0f;
@@ -190,5 +228,7 @@ namespace AIRefactored.AI.Perception
 
             return Mathf.Clamp(range, MinEffectiveRange, MaxEffectiveRange);
         }
+
+        #endregion
     }
 }

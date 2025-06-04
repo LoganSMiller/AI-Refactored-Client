@@ -18,9 +18,12 @@ namespace AIRefactored.AI.Perception
     /// <summary>
     /// Handles flashblindness, flare, suppression, and panic triggers for bots.
     /// All logic is overlay/event-only, error-isolated, null-guarded, and squad-synced.
+    /// Never triggers movement or pose change. Zero teleport/hitch risk.
     /// </summary>
     public sealed class BotPerceptionSystem : IFlashReactiveBot
     {
+        #region Constants
+
         private const float BlindSpeechThreshold = 0.4f;
         private const float FlareRecoverySpeed = 0.2f;
         private const float FlashRecoverySpeed = 0.5f;
@@ -30,6 +33,10 @@ namespace AIRefactored.AI.Perception
         private const float SuppressionRecoverySpeed = 0.3f;
         private const float SuppressedThreshold = 0.18f;
         private const float PanicCooldown = 2.4f;
+
+        #endregion
+
+        #region Fields
 
         private float _blindStartTime = -1f;
         private float _flashBlindness;
@@ -44,7 +51,15 @@ namespace AIRefactored.AI.Perception
         private bool _panicTriggered;
         private float _lastPanicTime;
 
+        #endregion
+
+        #region Properties
+
         public bool IsSuppressed => _suppressionFactor > SuppressedThreshold;
+
+        #endregion
+
+        #region Initialization
 
         /// <summary>
         /// Overlay/event-only. Called from BotBrain tick, never per-frame or coroutine.
@@ -81,6 +96,10 @@ namespace AIRefactored.AI.Perception
                 Plugin.LoggerInstance.LogError($"[BotPerceptionSystem] Initialize exception: {ex}");
             }
         }
+
+        #endregion
+
+        #region Overlay/Event Tick
 
         /// <summary>
         /// Overlay/event-only. Called from BotBrain overlay tick, never per-frame or coroutine.
@@ -119,6 +138,10 @@ namespace AIRefactored.AI.Perception
                 Plugin.LoggerInstance.LogError($"[BotPerceptionSystem] Tick exception: {ex}");
             }
         }
+
+        #endregion
+
+        #region Overlay/Event-Only External Stimulus
 
         /// <summary>
         /// Overlay-only: Handles external flare stimulus (never tick-based).
@@ -203,6 +226,10 @@ namespace AIRefactored.AI.Perception
                 Plugin.LoggerInstance.LogError($"[BotPerceptionSystem] OnFlashExposure exception: {ex}");
             }
         }
+
+        #endregion
+
+        #region Private Helpers
 
         private bool IsActive()
         {
@@ -323,5 +350,7 @@ namespace AIRefactored.AI.Perception
                 Plugin.LoggerInstance.LogError($"[BotPerceptionSystem] SyncEnemyIfVisible exception: {ex}");
             }
         }
+
+        #endregion
     }
 }

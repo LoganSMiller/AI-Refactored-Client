@@ -17,6 +17,11 @@ namespace AIRefactored.AI.Groups
     using UnityEngine;
     using UnityEngine.AI;
 
+    /// <summary>
+    /// Handles squad flocking, formation, dynamic roles, leadership, squad comms, and overlay-only movement.
+    /// All movement is NavMesh safe, deduped, cooldown/position pooled, never tick-spammed or teleported.
+    /// Bulletproof: never disables, never allocates in hot path, multiplayer/headless safe.
+    /// </summary>
     public sealed class BotGroupBehavior
     {
         #region Constants
@@ -34,7 +39,6 @@ namespace AIRefactored.AI.Groups
         private const float NavSampleRadius = 1.45f;
         private const int MaxNavMeshRetries = 2;
         private const float OverlayMoveDedupSqr = 0.0001f;
-
         private static readonly float MinSpacingSqr = MinSpacing * MinSpacing;
         private static readonly float MaxSpacingSqr = MaxSpacing * MaxSpacing;
         private static readonly float MaxSquadRadiusSqr = MaxSquadRadius * MaxSquadRadius;
@@ -47,18 +51,15 @@ namespace AIRefactored.AI.Groups
         private BotComponentCache _cache;
         private BotsGroup _group;
         private BotMoveCache _moveCache;
-
         private Vector3 _lastMoveTarget;
         private float _lastMoveTime;
         private Vector2 _personalDrift;
         private float _nervousnessLevel;
         private float _lastChatterTime;
-
         private int _squadLeaderIndex;
         private List<BotOwner> _squadMembers;
         private float _lastLeadershipRotationTime;
         private float _lastRoleReassignTime;
-
         public BotGroupSyncCoordinator GroupSync { get; private set; }
         public bool IsFollowingLeader { get; private set; }
         public bool IsInSquad => _group != null && _group.MembersCount > 1;
@@ -71,17 +72,18 @@ namespace AIRefactored.AI.Groups
 
         #region Initialization
 
+        /// <summary>
+        /// Initializes group behavior and all overlay/event/squad/role movement pools.
+        /// </summary>
         public void Initialize(BotComponentCache componentCache)
         {
             _cache = componentCache;
             _bot = componentCache?.Bot;
             _group = _bot?.BotsGroup;
             _moveCache = _cache?.MoveCache as BotMoveCache ?? new BotMoveCache();
-
             GroupSync = new BotGroupSyncCoordinator();
             GroupSync.Initialize(_bot);
             GroupSync.InjectLocalCache(_cache);
-
             _personalDrift = ComputePersonalDrift(_bot?.ProfileId ?? "");
             _nervousnessLevel = UnityEngine.Random.Range(0.19f, 0.53f);
             _squadLeaderIndex = 0;
@@ -95,6 +97,10 @@ namespace AIRefactored.AI.Groups
 
         #region Main Tick
 
+        /// <summary>
+        /// Ticked by BotBrain only. Handles flocking, repulsion, formation overlays.
+        /// All movement is overlay/event only, pooled, deduped, and never teleports.
+        /// </summary>
         public void Tick(float deltaTime)
         {
             if (_bot == null || _cache == null || _group == null || _bot.IsDead || _bot.Memory == null || _bot.Memory.GoalEnemy != null || _group.MembersCount <= 1)
@@ -122,16 +128,13 @@ namespace AIRefactored.AI.Groups
                 BotOwner mate = _group.Member(i);
                 if (mate == null || ReferenceEquals(mate, _bot) || mate.IsDead || mate.Memory == null)
                     continue;
-
                 Vector3 offset = mate.Position - myPos;
                 float distSqr = offset.sqrMagnitude;
-
                 if (distSqr < closestDist)
                 {
                     closestDist = distSqr;
                     closestIdx = i;
                 }
-
                 if (distSqr < effectiveMinSpacingSqr)
                 {
                     float push = MinSpacing - Mathf.Sqrt(distSqr);
@@ -152,7 +155,7 @@ namespace AIRefactored.AI.Groups
 
             if (repulsion.sqrMagnitude > 0.013f)
             {
-                TryIssueGroupMove(SafeNavMeshMove(SmoothDriftMove(myPos, repulsion.normalized * RepulseStrength, deltaTime, true), myPos), now);
+                OverlayMoveEvent(SafeNavMeshMove(SmoothDriftMove(myPos, repulsion.normalized * RepulseStrength, deltaTime, true), myPos), now);
                 IsFollowingLeader = false;
                 return;
             }
@@ -162,7 +165,7 @@ namespace AIRefactored.AI.Groups
                 Vector3 dir = furthest - myPos;
                 if (dir.sqrMagnitude > 0.0008f)
                 {
-                    TryIssueGroupMove(SafeNavMeshMove(SmoothDriftMove(myPos, dir.normalized * MaxSpacing * 0.69f, deltaTime, false), myPos), now);
+                    OverlayMoveEvent(SafeNavMeshMove(SmoothDriftMove(myPos, dir.normalized * MaxSpacing * 0.69f, deltaTime, false), myPos), now);
                     IsFollowingLeader = false;
                     return;
                 }
@@ -174,7 +177,7 @@ namespace AIRefactored.AI.Groups
                 Vector3 leaderDir = anchorTarget - myPos;
                 if (leaderDir.sqrMagnitude > 0.00023f)
                 {
-                    TryIssueGroupMove(SafeNavMeshMove(SmoothDriftMove(myPos, leaderDir.normalized * (MinSpacing * 0.8f), deltaTime, false), myPos), now);
+                    OverlayMoveEvent(SafeNavMeshMove(SmoothDriftMove(myPos, leaderDir.normalized * (MinSpacing * 0.8f), deltaTime, false), myPos), now);
                     IsFollowingLeader = true;
                 }
             }
@@ -182,27 +185,32 @@ namespace AIRefactored.AI.Groups
 
         #endregion
 
-        #region Event-Driven Movement
+        #region Overlay/Event Movement Enforcement
 
-        private void TryIssueGroupMove(Vector3 target, float now)
+        /// <summary>
+        /// Overlay/event squad move: strictly deduped, NavMesh safe, micro-drifted, pooled, never teleports.
+        /// All cache/cooldown only updated on valid move.
+        /// </summary>
+        private void OverlayMoveEvent(Vector3 moveIntent, float now)
         {
             if (_cache == null || _bot == null || _moveCache == null)
                 return;
-
-            if ((_moveCache.LastIssuedTarget - target).sqrMagnitude < OverlayMoveDedupSqr || (now - _moveCache.LastMoveTime) < MinTickMoveInterval)
+            // Dedup/cooldown after sampling & drift
+            if ((_moveCache.LastIssuedTarget - moveIntent).sqrMagnitude < OverlayMoveDedupSqr || (now - _moveCache.LastMoveTime) < MinTickMoveInterval)
                 return;
-
-            if (!NavMesh.SamplePosition(target, out NavMeshHit navHit, NavSampleRadius, NavMesh.AllAreas))
+            // NavMesh validate & drift (again, in case caller passed an intent)
+            if (!NavMesh.SamplePosition(moveIntent, out var navHit, NavSampleRadius, NavMesh.AllAreas))
                 return;
-
             Vector3 safeTarget = ClampYValid(navHit.position, _bot.Position);
             if (!IsVectorValid(safeTarget))
                 return;
-
             Vector3 drifted = BotMovementHelper.ApplyMicroDrift(safeTarget, _bot.ProfileId, Time.frameCount, _cache.PersonalityProfile);
-
+            // Final dedup/cooldown check on drifted
+            if ((_moveCache.LastIssuedTarget - drifted).sqrMagnitude < OverlayMoveDedupSqr || (now - _moveCache.LastMoveTime) < MinTickMoveInterval)
+                return;
+            // Only call helper. All cache/cooldown updated inside helper only if move issued
             BotMovementHelper.SmoothMoveToSafe(_bot, drifted, false, 1f);
-
+            // Cache/cooldown for overlay: always matches helper
             _moveCache.LastMoveTime = now;
             _moveCache.LastIssuedTarget = drifted;
             _lastMoveTime = now;
@@ -215,13 +223,11 @@ namespace AIRefactored.AI.Groups
             jitter.y = 0f;
             Vector3 drift = direction.normalized * DriftSpeed * Mathf.Clamp(deltaTime * 2.08f, 0.11f, 0.34f);
             Vector3 personalBias = new Vector3(_personalDrift.x, 0f, _personalDrift.y);
-
             if (strongNervous)
             {
                 float hesitation = Mathf.Sin(Time.time * (1.17f + _nervousnessLevel)) * 0.13f * _nervousnessLevel;
                 personalBias += new Vector3(-_personalDrift.y, 0f, _personalDrift.x) * hesitation;
             }
-
             return basePos + drift + jitter + personalBias;
         }
 
@@ -232,7 +238,6 @@ namespace AIRefactored.AI.Groups
         {
             if (NavMesh.SamplePosition(candidate, out var hit, NavSampleRadius, NavMesh.AllAreas))
                 return ClampYValid(hit.position, origin);
-
             for (int i = 0; i < MaxNavMeshRetries; i++)
             {
                 Vector3 fallback = origin + UnityEngine.Random.insideUnitSphere * (1.5f + i * 0.7f);
@@ -240,7 +245,6 @@ namespace AIRefactored.AI.Groups
                 if (NavMesh.SamplePosition(fallback, out var nav, NavSampleRadius, NavMesh.AllAreas))
                     return ClampYValid(nav.position, origin);
             }
-
             return ClampYValid(origin, origin);
         }
 
@@ -249,6 +253,11 @@ namespace AIRefactored.AI.Groups
             if (Mathf.Abs(v.y - basePos.y) > 3f || v.y < -2.5f)
                 v.y = basePos.y;
             return v;
+        }
+
+        private static bool IsVectorValid(Vector3 v)
+        {
+            return !float.IsNaN(v.x) && !float.IsNaN(v.y) && !float.IsNaN(v.z) && Mathf.Abs(v.y) < 1000f && v.y > -2.5f;
         }
 
         #endregion
@@ -281,7 +290,6 @@ namespace AIRefactored.AI.Groups
                 _squadLeaderIndex = 0;
                 return;
             }
-
             if (_squadMembers == null || _squadMembers.Count != _group.MembersCount)
             {
                 _squadMembers = new List<BotOwner>(_group.MembersCount);
@@ -295,12 +303,10 @@ namespace AIRefactored.AI.Groups
         {
             float bestComposure = float.MinValue;
             int leaderIdx = 0;
-
             for (int i = 0; i < _squadMembers.Count; i++)
             {
                 var mate = _squadMembers[i];
                 if (mate == null || mate.IsDead) continue;
-
                 if (BotComponentCacheRegistry.TryGetByPlayer(mate.GetPlayer, out var mateCache))
                 {
                     float composure = mateCache?.PanicHandler?.GetComposureLevel() ?? 0.5f;
@@ -317,10 +323,8 @@ namespace AIRefactored.AI.Groups
         private void DynamicLeadershipRotation()
         {
             float now = Time.time;
-
             if (_squadMembers == null || _squadMembers.Count == 0)
                 return;
-
             var leader = _squadMembers[_squadLeaderIndex];
             if (leader == null || leader.IsDead)
             {
@@ -337,30 +341,24 @@ namespace AIRefactored.AI.Groups
             float now = Time.time;
             if (_squadMembers == null || _squadMembers.Count == 0 || now - _lastRoleReassignTime < RoleReassignCooldown)
                 return;
-
             int medicIdx = -1, flankerIdx = -1, supportIdx = -1;
             float bestHealing = float.MinValue, bestFlank = float.MinValue, bestSupport = float.MinValue;
-
             for (int i = 0; i < _squadMembers.Count; i++)
             {
                 var mate = _squadMembers[i];
                 if (mate == null || mate.IsDead) continue;
-
                 if (BotComponentCacheRegistry.TryGetByPlayer(mate.GetPlayer, out var mateCache))
                 {
                     var p = mateCache?.AIRefactoredBotOwner?.PersonalityProfile;
                     if (p == null) continue;
-
                     if (p.Caution > bestHealing) { medicIdx = i; bestHealing = p.Caution; }
                     if (p.AggressionLevel > bestFlank) { flankerIdx = i; bestFlank = p.AggressionLevel; }
                     if (p.Cohesion > bestSupport) { supportIdx = i; bestSupport = p.Cohesion; }
                 }
             }
-
             IsMedic = medicIdx >= 0 && _squadMembers[medicIdx] == _bot;
             IsFlanker = flankerIdx >= 0 && _squadMembers[flankerIdx] == _bot;
             IsSupport = supportIdx >= 0 && _squadMembers[supportIdx] == _bot;
-
             _lastRoleReassignTime = now;
         }
 
@@ -376,13 +374,11 @@ namespace AIRefactored.AI.Groups
             {
                 if (_group == null || source == null || source.IsDead || _group.MembersCount < 2)
                     return;
-
                 for (int i = 0; i < _group.MembersCount; i++)
                 {
                     var mate = _group.Member(i);
                     if (mate == null || mate.IsDead || ReferenceEquals(mate, source) || mate.Memory == null)
                         continue;
-
                     var danger = new PlaceForCheck(position, PlaceForCheckType.danger);
                     mate.DangerPointsData?.AddPointOfDanger(danger, true);
                 }
@@ -420,17 +416,14 @@ namespace AIRefactored.AI.Groups
         {
             if (_squadMembers == null || _squadMembers.Count == 0 || _bot == null || _bot.IsDead)
                 return Vector3.zero;
-
             Vector3 selfPos = _bot.Position;
             Vector3 intent = Vector3.zero;
             int count = 0;
-
             for (int i = 0; i < _squadMembers.Count; i++)
             {
                 BotOwner mate = _squadMembers[i];
                 if (mate == null || mate.IsDead || ReferenceEquals(mate, _bot))
                     continue;
-
                 Vector3 offset = mate.Position - selfPos;
                 float distSqr = offset.sqrMagnitude;
                 if (distSqr > 0.01f && distSqr < MaxSquadRadiusSqr)
@@ -440,7 +433,6 @@ namespace AIRefactored.AI.Groups
                     count++;
                 }
             }
-
             return count > 0 && intent.sqrMagnitude > 0.01f ? intent.normalized : Vector3.zero;
         }
 
@@ -460,28 +452,17 @@ namespace AIRefactored.AI.Groups
         {
             if (_squadMembers == null || requester == null)
                 return target;
-
             int index = _squadMembers.IndexOf(requester);
             if (index < 0) index = 0;
-
             float spread = MinSpacing + ((_squadMembers.Count - 1) * 0.7f);
             Vector3 forward = (target - requester.Position).normalized;
             if (forward.sqrMagnitude < 0.01f) forward = requester.LookDirection.normalized;
             Vector3 perp = Vector3.Cross(Vector3.up, forward);
             float offset = (index - (_squadMembers.Count / 2f)) * spread;
-
             Vector3 formationPoint = target + perp * offset;
-
             if (!NavMesh.SamplePosition(formationPoint, out var hit, 1.5f, NavMesh.AllAreas))
                 return target;
-
             return ClampYValid(hit.position, requester.Position);
-        }
-
-        private static bool IsVectorValid(Vector3 v)
-        {
-            return !float.IsNaN(v.x) && !float.IsNaN(v.y) && !float.IsNaN(v.z)
-                   && Mathf.Abs(v.y) < 1000f && v.y > -2.5f;
         }
 
         #endregion

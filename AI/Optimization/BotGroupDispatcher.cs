@@ -6,224 +6,219 @@
 
 namespace AIRefactored.AI.Optimization
 {
-	using System;
-	using System.Collections.Generic;
-	using System.Threading.Tasks;
-	using AIRefactored.AI.Core;
-	using AIRefactored.Core;
-	using AIRefactored.Pools;
-	using AIRefactored.Runtime;
-	using BepInEx.Logging;
-	using EFT;
-	using UnityEngine;
+    using System;
+    using System.Collections.Generic;
+    using System.Threading.Tasks;
+    using AIRefactored.AI.Core;
+    using AIRefactored.Core;
+    using AIRefactored.Pools;
+    using AIRefactored.Runtime;
+    using BepInEx.Logging;
+    using EFT;
+    using UnityEngine;
 
-	/// <summary>
-	/// High-performance thread-safe dispatcher for background bot workloads (pathfinding, planning, heavy logic).
-	/// All failures are locally isolated; system cannot deadlock, break, or leak across raid/domain reloads.
-	/// Fully multiplayer/headless compliant. Only pooled allocations; zero Unity API calls in worker threads.
-	/// </summary>
-	public static class BotWorkGroupDispatcher
-	{
-		#region Constants
+    /// <summary>
+    /// High-performance thread-safe dispatcher for background bot workloads (pathfinding, planning, heavy logic).
+    /// All failures are locally isolated; system cannot deadlock, break, or leak across raid/domain reloads.
+    /// Fully multiplayer/headless compliant. Only pooled allocations; zero Unity API calls in worker threads.
+    /// </summary>
+    public static class BotWorkGroupDispatcher
+    {
+        #region Constants
 
-		private const int MaxWorkPerTick = 256;
-		private const int MaxThreads = 16;
-		private const float ThreadVariance = 0.08f; // 8% random micro-variance in thread count for realism.
+        private const int MaxWorkPerTick = 256;
+        private const int MaxThreads = 16;
+        private const float ThreadVariance = 0.08f; // 8% random micro-variance in thread count for realism.
 
-		#endregion
+        #endregion
 
-		#region Fields
+        #region Fields
 
-		private static readonly object Sync = new object();
-		private static readonly ManualLogSource Log = Plugin.LoggerInstance;
+        private static readonly object Sync = new object();
+        private static readonly ManualLogSource Log = Plugin.LoggerInstance;
+        private static readonly List<IBotWorkload> WorkQueue = new List<IBotWorkload>(MaxWorkPerTick);
 
-		// Pooled, never replaced or grown at runtime.
-		private static readonly List<IBotWorkload> WorkQueue = new List<IBotWorkload>(MaxWorkPerTick);
+        private static int ThreadCount
+        {
+            get
+            {
+                int logical = Environment.ProcessorCount;
+                float delta = UnityEngine.Random.Range(-ThreadVariance, ThreadVariance);
+                int computed = Mathf.Clamp((int)(logical * (1f + delta)), 1, MaxThreads);
+                return computed;
+            }
+        }
 
-		private static int ThreadCount
-		{
-			get
-			{
-				int logical = Environment.ProcessorCount;
-				float delta = UnityEngine.Random.Range(-ThreadVariance, ThreadVariance);
-				int computed = Mathf.Clamp((int)(logical * (1f + delta)), 1, MaxThreads);
-				return computed;
-			}
-		}
+        #endregion
 
-		#endregion
+        #region Public API
 
-		#region Public API
+        /// <summary>
+        /// Schedules a new bot workload for background execution.
+        /// Errors are always locally contained; the dispatcher is never breakable.
+        /// </summary>
+        public static void Schedule(IBotWorkload workload)
+        {
+            if (workload == null) return;
 
-		/// <summary>
-		/// Schedules a new bot workload for background execution.
-		/// Errors are always locally contained; the dispatcher is never breakable.
-		/// </summary>
-		/// <param name="workload">The workload to execute (must be non-null).</param>
-		public static void Schedule(IBotWorkload workload)
-		{
-			if (workload == null) return;
+            try
+            {
+                lock (Sync)
+                {
+                    if (WorkQueue.Count >= MaxWorkPerTick)
+                    {
+                        LogIfNotHeadless("[BotWorkGroupDispatcher] Queue full; dropping workload.");
+                        return;
+                    }
+                    WorkQueue.Add(workload);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogIfNotHeadless("[BotWorkGroupDispatcher] Schedule() exception: " + ex, true);
+            }
+        }
 
-			try
-			{
-				lock (Sync)
-				{
-					if (WorkQueue.Count >= MaxWorkPerTick)
-					{
-						LogIfNotHeadless("[BotWorkGroupDispatcher] Queue full; dropping workload.");
-						return;
-					}
-					WorkQueue.Add(workload);
-				}
-			}
-			catch (Exception ex)
-			{
-				LogIfNotHeadless("[BotWorkGroupDispatcher] Schedule() exception: " + ex, true);
-			}
-		}
+        /// <summary>
+        /// Dispatches queued workloads in parallel thread batches.
+        /// Safe to call from Update() or world tick. All errors are locally contained.
+        /// </summary>
+        public static void Tick()
+        {
+            try
+            {
+                if (!GameWorldHandler.IsLocalHost())
+                    return;
 
-		/// <summary>
-		/// Dispatches queued workloads in parallel thread batches.
-		/// Safe to call from Update() or world tick. All errors are locally contained.
-		/// </summary>
-		public static void Tick()
-		{
-			try
-			{
-				// Always headless/multiplayer safe: Only run on host/owner instance.
-				if (!GameWorldHandler.IsLocalHost())
-					return;
+                List<IBotWorkload> batch = null;
 
-				List<IBotWorkload> batch = null;
+                lock (Sync)
+                {
+                    if (WorkQueue.Count == 0)
+                        return;
 
-				lock (Sync)
-				{
-					if (WorkQueue.Count == 0)
-						return;
+                    int count = Mathf.Min(WorkQueue.Count, MaxWorkPerTick);
+                    batch = TempListPool.Rent<IBotWorkload>();
+                    for (int i = 0; i < count; i++)
+                        batch.Add(WorkQueue[i]);
+                    WorkQueue.RemoveRange(0, count);
+                }
 
-					int count = Mathf.Min(WorkQueue.Count, MaxWorkPerTick);
-					batch = TempListPool.Rent<IBotWorkload>();
-					for (int i = 0; i < count; i++)
-						batch.Add(WorkQueue[i]);
-					WorkQueue.RemoveRange(0, count);
-				}
+                try
+                {
+                    Dispatch(batch);
+                }
+                catch (Exception ex)
+                {
+                    LogIfNotHeadless("[BotWorkGroupDispatcher] Dispatch() exception: " + ex, true);
+                }
+                finally
+                {
+                    TempListPool.Return(batch);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogIfNotHeadless("[BotWorkGroupDispatcher] Tick() exception: " + ex, true);
+            }
+        }
 
-				try
-				{
-					Dispatch(batch);
-				}
-				catch (Exception ex)
-				{
-					LogIfNotHeadless("[BotWorkGroupDispatcher] Dispatch() exception: " + ex, true);
-				}
-				finally
-				{
-					TempListPool.Return(batch);
-				}
-			}
-			catch (Exception ex)
-			{
-				LogIfNotHeadless("[BotWorkGroupDispatcher] Tick() exception: " + ex, true);
-			}
-		}
+        /// <summary>
+        /// Fully clears dispatcher state. Safe to call on raid or domain reload.
+        /// </summary>
+        public static void ClearAll()
+        {
+            lock (Sync)
+            {
+                WorkQueue.Clear();
+            }
+        }
 
-		/// <summary>
-		/// Fully clears dispatcher state. Safe to call on raid or domain reload.
-		/// </summary>
-		public static void ClearAll()
-		{
-			lock (Sync)
-			{
-				WorkQueue.Clear();
-			}
-		}
+        #endregion
 
-		#endregion
+        #region Private Dispatch
 
-		#region Private Dispatch
+        /// <summary>
+        /// Dispatches a batch of workloads using a variable thread count.
+        /// Never calls Unity API from worker threads. All failures isolated.
+        /// </summary>
+        private static void Dispatch(List<IBotWorkload> batch)
+        {
+            if (batch == null || batch.Count == 0)
+                return;
 
-		/// <summary>
-		/// Dispatches a batch of workloads using a variable thread count.
-		/// Never calls Unity API from worker threads. All failures isolated.
-		/// </summary>
-		/// <param name="batch">Pooled batch to process (never null).</param>
-		private static void Dispatch(List<IBotWorkload> batch)
-		{
-			if (batch == null || batch.Count == 0)
-				return;
+            try
+            {
+                int total = batch.Count;
+                int threads = Mathf.Clamp(ThreadCount, 1, total);
+                int blockSize = Mathf.CeilToInt(total / (float)threads);
 
-			try
-			{
-				int total = batch.Count;
-				int threads = Mathf.Clamp(ThreadCount, 1, total);
-				int blockSize = Mathf.CeilToInt(total / (float)threads);
+                for (int t = 0; t < threads; t++)
+                {
+                    int start = t * blockSize;
+                    if (start >= total)
+                        break;
 
-				for (int t = 0; t < threads; t++)
-				{
-					int start = t * blockSize;
-					if (start >= total)
-						break;
+                    int end = Mathf.Min(start + blockSize, total);
 
-					int end = Mathf.Min(start + blockSize, total);
+                    int localStart = start, localEnd = end;
 
-					int localStart = start, localEnd = end;
+                    Task.Run(() =>
+                    {
+                        for (int i = localStart; i < localEnd; i++)
+                        {
+                            IBotWorkload job = null;
+                            try { job = batch[i]; }
+                            catch { continue; }
 
-					Task.Run(() =>
-					{
-						for (int i = localStart; i < localEnd; i++)
-						{
-							IBotWorkload job = null;
-							try { job = batch[i]; }
-							catch { continue; }
+                            if (job == null)
+                                continue;
 
-							if (job == null)
-								continue;
+                            try { job.RunBackgroundWork(); }
+                            catch (Exception ex)
+                            {
+                                LogIfNotHeadless("[BotWorkGroupDispatcher] Exception in job: " + ex, false);
+                            }
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                LogIfNotHeadless("[BotWorkGroupDispatcher] Dispatch() block exception: " + ex, true);
+            }
+        }
 
-							try { job.RunBackgroundWork(); }
-							catch (Exception ex)
-							{
-								LogIfNotHeadless("[BotWorkGroupDispatcher] Exception in job: " + ex, false);
-							}
-						}
-					});
-				}
-			}
-			catch (Exception ex)
-			{
-				LogIfNotHeadless("[BotWorkGroupDispatcher] Dispatch() block exception: " + ex, true);
-			}
-		}
+        #endregion
 
-		#endregion
+        #region Logging & Safety
 
-		#region Logging & Safety
+        /// <summary>
+        /// Logs a warning or error (never in FIKA headless), always BepInEx.
+        /// </summary>
+        private static void LogIfNotHeadless(string msg, bool error = false)
+        {
+            if (FikaHeadlessDetector.IsHeadless)
+                return;
+            if (error)
+                Log.LogError(msg);
+            else
+                Log.LogWarning(msg);
+        }
 
-		/// <summary>
-		/// Logs a warning or error (never in FIKA headless), always BepInEx.
-		/// </summary>
-		private static void LogIfNotHeadless(string msg, bool error = false)
-		{
-			if (FikaHeadlessDetector.IsHeadless)
-				return;
-			if (error)
-				Log.LogError(msg);
-			else
-				Log.LogWarning(msg);
-		}
+        #endregion
+    }
 
-		#endregion
-	}
-
-	/// <summary>
-	/// Background-thread safe interface for all pooled bot jobs.
-	/// Must never call UnityEngine API from background threads.
-	/// </summary>
-	public interface IBotWorkload
-	{
-		/// <summary>
-		/// Entry point for background work (no Unity API allowed).
-		/// All exceptions are handled by the dispatcher.
-		/// </summary>
-		void RunBackgroundWork();
-	}
+    /// <summary>
+    /// Background-thread safe interface for all pooled bot jobs.
+    /// Must never call UnityEngine API from background threads.
+    /// </summary>
+    public interface IBotWorkload
+    {
+        /// <summary>
+        /// Entry point for background work (no Unity API allowed).
+        /// All exceptions are handled by the dispatcher.
+        /// </summary>
+        void RunBackgroundWork();
+    }
 }

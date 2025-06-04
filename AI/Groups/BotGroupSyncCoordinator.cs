@@ -71,7 +71,6 @@ namespace AIRefactored.AI.Groups
                 _group = botOwner?.BotsGroup;
                 if (_group == null)
                     throw new ArgumentException("[BotGroupSyncCoordinator] BotsGroup is null.");
-
                 _group.OnMemberAdd += OnMemberAdded;
                 _group.OnMemberRemove += OnMemberRemoved;
                 ResetSync();
@@ -123,7 +122,6 @@ namespace AIRefactored.AI.Groups
         {
             _fallbackPoint = fallback;
             _hasFallback = true;
-
             foreach (var mate in _teammateCaches.Values)
             {
                 try
@@ -144,7 +142,6 @@ namespace AIRefactored.AI.Groups
         {
             _lastDangerPosition = dangerPos;
             _lastDangerBroadcastTime = now;
-
             foreach (var mate in _teammateCaches.Values)
             {
                 try
@@ -164,7 +161,6 @@ namespace AIRefactored.AI.Groups
         {
             _lootPoint = loot;
             _hasLoot = true;
-
             foreach (var mate in _teammateCaches.Values)
             {
                 try { mate.LootScanner?.RegisterSquadLootTarget(loot); } catch { }
@@ -178,7 +174,6 @@ namespace AIRefactored.AI.Groups
         {
             _extractPoint = extract;
             _hasExtract = true;
-
             foreach (var mate in _teammateCaches.Values)
             {
                 try { mate.TacticalMemory?.MarkForcedExtract(); } catch { }
@@ -192,7 +187,6 @@ namespace AIRefactored.AI.Groups
         public Vector3? GetSharedFallbackTarget() => _hasFallback ? (Vector3?)_fallbackPoint : null;
         public Vector3? GetSharedLootTarget() => _hasLoot ? (Vector3?)_lootPoint : null;
         public Vector3? GetSharedExtractTarget() => _hasExtract ? (Vector3?)_extractPoint : null;
-
         public bool IsSquadReady() => _teammateCaches.Count > 0;
 
         /// <summary>
@@ -224,7 +218,6 @@ namespace AIRefactored.AI.Groups
         private void RefreshTeammateCaches()
         {
             if (_group == null) return;
-
             for (int i = 0; i < _group.MembersCount; i++)
             {
                 BotOwner member = _group.Member(i);
@@ -233,24 +226,20 @@ namespace AIRefactored.AI.Groups
                 {
                     if (!BotRegistry.TryGetRefactoredOwner(member.ProfileId, out var owner))
                         continue;
-
                     var cache = new BotComponentCache();
                     cache.Initialize(member);
                     cache.SetOwner(owner);
                     _teammateCaches[member] = cache;
                 }
             }
-
             var toRemove = TempListPool.Rent<BotOwner>();
             foreach (var kv in _teammateCaches)
             {
                 if (kv.Key == null || kv.Key.IsDead)
                     toRemove.Add(kv.Key);
             }
-
             foreach (var bot in toRemove)
                 _teammateCaches.Remove(bot);
-
             TempListPool.Return(toRemove);
         }
 
@@ -258,10 +247,8 @@ namespace AIRefactored.AI.Groups
         {
             if (teammate == null || ReferenceEquals(teammate, _bot) || _teammateCaches.ContainsKey(teammate)) return;
             if (teammate.IsDead || teammate.GetPlayer == null || !teammate.GetPlayer.IsAI) return;
-
             if (!BotRegistry.TryGetRefactoredOwner(teammate.ProfileId, out var owner))
                 return;
-
             var cache = new BotComponentCache();
             cache.Initialize(teammate);
             cache.SetOwner(owner);

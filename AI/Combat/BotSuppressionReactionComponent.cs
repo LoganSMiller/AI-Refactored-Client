@@ -70,6 +70,10 @@ namespace AIRefactored.AI.Combat
 
         #region Initialization
 
+        /// <summary>
+        /// Initializes the suppression reaction component for a bot.
+        /// </summary>
+        /// <param name="componentCache">The bot's component cache.</param>
         public void Initialize(BotComponentCache componentCache)
         {
             if (componentCache == null || componentCache.Bot == null)
@@ -94,6 +98,9 @@ namespace AIRefactored.AI.Combat
 
         #region Public API
 
+        /// <summary>
+        /// Returns whether the bot is currently suppressed.
+        /// </summary>
         public bool IsSuppressed() => _isSuppressed;
 
         /// <summary>
@@ -135,8 +142,9 @@ namespace AIRefactored.AI.Combat
         }
 
         /// <summary>
-        /// Triggers suppression (panic, retreat, voice, squad contagion, comms). Overlay/intent-only.
+        /// Triggers suppression (panic, retreat, voice, squad contagion, comms). Overlay/intent-only, anti-teleport, anti-hitch.
         /// </summary>
+        /// <param name="source">Optional: source of suppression event (e.g. incoming fire).</param>
         public void TriggerSuppression(Vector3? source)
         {
             if (_isSuppressed || !IsValid())
@@ -151,7 +159,7 @@ namespace AIRefactored.AI.Combat
                 _isSuppressed = true;
                 _suppressionStartTime = Time.time;
 
-                // Decay composure if possible (deep panic risk)
+                // Composure decay (deep panic risk)
                 if (panic != null && _composureField != null)
                 {
                     float loss = UnityEngine.Random.Range(ComposureLossMin, ComposureLossMax);
@@ -160,35 +168,34 @@ namespace AIRefactored.AI.Combat
                 }
 
                 // Overlay retreat direction, fully anti-hitch/anti-teleport/anti-double-issue
-                Vector3 retreat = source.HasValue
+                Vector3 retreatDir = source.HasValue
                     ? (_bot.Position - source.Value).normalized
                     : GetDefaultRetreatDirection();
 
-                Vector3 fallback = _bot.Position + retreat * MinSuppressionRetreatDistance;
+                Vector3 fallback = _bot.Position + retreatDir * MinSuppressionRetreatDistance;
                 fallback.y = _bot.Position.y;
 
+                // Always NavMesh validate, clamp, dedup after sampling (never raw move)
                 if (BotNavHelper.TryGetSafeTarget(_bot, out var navTarget) && IsVectorValid(navTarget))
                     fallback = navTarget;
 
                 float cohesion = _cache.AIRefactoredBotOwner?.PersonalityProfile?.Cohesion ?? 1f;
 
-                // Overlay move dedup/guard: Only issue if not paused/interacting, not recently issued, and no anticipation/fakeout is pending
+                // Anti-hitch/anti-teleport overlay dedup and overlay guard
                 if (!BotMovementHelper.IsMovementPaused(_bot)
                     && !BotMovementHelper.IsInInteractionState(_bot)
                     && (_lastSuppressionMoveIssued - fallback).sqrMagnitude > OverlayMoveDedupSqr
-                    && (Time.time - _lastSuppressionMoveTime) > OverlayMoveCooldown)
+                    && (Time.time - _lastSuppressionMoveTime) > OverlayMoveCooldown
+                    && !IsAnticipationActive(_bot)) // Centralized anticipation/fakeout overlay block
                 {
-                    if (_bot.Mover != null)
-                    {
-                        BotMovementHelper.SmoothMoveToSafe(_bot, fallback, slow: false, cohesion);
-                        _bot.Sprint(true);
-                        BotCoverHelper.TrySetStanceFromNearbyCover(_cache, fallback);
+                    BotMovementHelper.SmoothMoveToSafe(_bot, fallback, slow: false, cohesion);
+                    _bot.Sprint(true);
+                    BotCoverHelper.TrySetStanceFromNearbyCover(_cache, fallback);
 
-                        _lastSuppressionMoveIssued = fallback;
-                        _lastSuppressionMoveTime = Time.time;
-                    }
+                    _lastSuppressionMoveIssued = fallback;
+                    _lastSuppressionMoveTime = Time.time;
                 }
-                // Else: if blocked, do not update any state/cache
+                // Never update cache/timestamp on blocked or failed move
 
                 // Panic escalation (contagion)
                 if (panic != null && panic.GetComposureLevel() < PanicComposureThreshold)
@@ -197,6 +204,7 @@ namespace AIRefactored.AI.Combat
                 _cache.Escalation?.NotifyPanicTriggered();
                 TryPropagateSuppression();
 
+                // Voice/phrase logic
                 if (_bot.BotTalk != null && Time.time - _lastVoiceTime > SuppressionVoiceCooldown)
                 {
                     var triggers = UnityEngine.Random.value < 0.5f ? SuppressionTriggers : SquadSyncTriggers;
@@ -281,6 +289,15 @@ namespace AIRefactored.AI.Combat
         private static bool IsVectorValid(Vector3 v)
         {
             return !float.IsNaN(v.x) && !float.IsNaN(v.y) && !float.IsNaN(v.z);
+        }
+
+        /// <summary>
+        /// Returns true if an anticipation/fakeout overlay/lock is currently active on the bot.
+        /// </summary>
+        private static bool IsAnticipationActive(BotOwner bot)
+        {
+            // Placeholder for future: Integrate with centralized anticipation/fakeout overlay lock manager if present.
+            return false;
         }
 
         #endregion

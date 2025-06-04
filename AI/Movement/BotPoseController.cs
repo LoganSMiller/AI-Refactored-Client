@@ -35,7 +35,7 @@ namespace AIRefactored.AI.Movement
         private const float StandPose = 100f;
         private const float SquadCrouchRadius = 2.6f;
         private const float AnticipatePoseJitter = 6f;
-        private const float AnticipatePoseChance = 0.11f;
+        private const float AnticipatePoseChance = 0.13f;
         private const float CoverNearThreshold = 2.65f;
 
         #endregion
@@ -92,8 +92,14 @@ namespace AIRefactored.AI.Movement
 
         #region Public API
 
+        /// <summary>
+        /// Returns the current pose level.
+        /// </summary>
         public float GetPoseLevel() => _movement?.PoseLevel ?? StandPose;
 
+        /// <summary>
+        /// Locks bot into crouch pose. Used for e.g. loot/medic overlays, squad stack, or fallback.
+        /// </summary>
         public void LockCrouchPose()
         {
             _targetPoseLevel = CrouchPose;
@@ -102,6 +108,9 @@ namespace AIRefactored.AI.Movement
             _anticipateOffset = 0f;
         }
 
+        /// <summary>
+        /// Releases any pose lock, allowing overlay logic to resume.
+        /// </summary>
         public void UnlockPose()
         {
             _isLocked = false;
@@ -110,9 +119,11 @@ namespace AIRefactored.AI.Movement
         }
 
         public void Crouch() => SetCrouch(false);
-
         public void Stand() => SetStand();
 
+        /// <summary>
+        /// Sets target pose to crouch, optionally with anticipation/fakeout overlay.
+        /// </summary>
         public void SetCrouch(bool anticipate = false)
         {
             _targetPoseLevel = anticipate
@@ -121,6 +132,9 @@ namespace AIRefactored.AI.Movement
             if (anticipate) StartAnticipation();
         }
 
+        /// <summary>
+        /// Sets target pose to prone, optionally with anticipation/fakeout overlay.
+        /// </summary>
         public void SetProne(bool anticipate = false)
         {
             _targetPoseLevel = anticipate
@@ -129,6 +143,9 @@ namespace AIRefactored.AI.Movement
             if (anticipate) StartAnticipation();
         }
 
+        /// <summary>
+        /// Sets target pose to stand, clears anticipation.
+        /// </summary>
         public void SetStand()
         {
             _targetPoseLevel = StandPose;
@@ -169,7 +186,7 @@ namespace AIRefactored.AI.Movement
 
                 if (currentTime >= _nextPoseCheckTime)
                 {
-                    _nextPoseCheckTime = currentTime + PoseCheckInterval + UnityEngine.Random.Range(-0.08f, 0.14f);
+                    _nextPoseCheckTime = currentTime + PoseCheckInterval + UnityEngine.Random.Range(-0.07f, 0.16f);
                     EvaluatePoseIntent(currentTime);
                 }
 
@@ -202,13 +219,16 @@ namespace AIRefactored.AI.Movement
 
         #region Internal Logic
 
+        /// <summary>
+        /// Smoothly blends toward the target pose with context-sensitive speed.
+        /// </summary>
         private void BlendPose(float deltaTime)
         {
             if (Mathf.Abs(_currentPoseLevel - _targetPoseLevel) < MinPoseThreshold) return;
 
-            float panic = _cache.PanicHandler?.IsPanicking == true ? 0.44f : 1f;
-            float combat = _cache.Combat?.IsInCombatState() == true ? 1f : 0.29f;
-            float squad = IsSquadStacked() ? 0.61f : 1f;
+            float panic = _cache.PanicHandler?.IsPanicking == true ? 0.39f : 1f;
+            float combat = _cache.Combat?.IsInCombatState() == true ? 1f : 0.24f;
+            float squad = IsSquadStacked() ? 0.54f : 1f;
             float speed = PoseBlendSpeedBase * panic * combat * squad;
 
             float newPose = Mathf.MoveTowards(_currentPoseLevel, _targetPoseLevel, speed * deltaTime);
@@ -219,12 +239,21 @@ namespace AIRefactored.AI.Movement
             }
         }
 
+        /// <summary>
+        /// Evaluates pose intent every interval: context-aware, overlays anticipation, suppression, squad stack, panic, flank, and personality logic.
+        /// </summary>
         private void EvaluatePoseIntent(float now)
         {
             try
             {
-                if (_cache.IsBlinded && now < _cache.BlindUntilTime) { _targetPoseLevel = CrouchPose; return; }
+                // Blinded bots crouch to reduce exposure
+                if (_cache.IsBlinded && now < _cache.BlindUntilTime)
+                {
+                    _targetPoseLevel = CrouchPose;
+                    return;
+                }
 
+                // Panic logic: bots prone (with anticipation) when panicked
                 if (_cache.PanicHandler?.IsPanicking == true)
                 {
                     if (UnityEngine.Random.value < AnticipatePoseChance) SetProne(true);
@@ -232,6 +261,7 @@ namespace AIRefactored.AI.Movement
                     return;
                 }
 
+                // Suppression overlay: bots crouch for a duration after suppression
                 if (_cache.Suppression?.IsSuppressed() == true)
                     _suppressedUntil = now + SuppressionCrouchDuration;
 
@@ -242,6 +272,7 @@ namespace AIRefactored.AI.Movement
                     return;
                 }
 
+                // Squad stack overlay: multiple bots close together, all crouch
                 if (IsSquadStacked())
                 {
                     if (UnityEngine.Random.value < AnticipatePoseChance) SetCrouch(true);
@@ -249,6 +280,7 @@ namespace AIRefactored.AI.Movement
                     return;
                 }
 
+                // Personality overlays: snipers and "frenzied"/fearful prone when flanking or at high threat angle
                 if (_personality.IsFrenzied || _personality.IsFearful || _personality.Personality == PersonalityType.Sniper)
                 {
                     bool flankSuccess;
@@ -261,6 +293,7 @@ namespace AIRefactored.AI.Movement
                     }
                 }
 
+                // Cover-aware overlays (from memory/cover info): sit or lay as appropriate
                 if (_bot.Memory?.BotCurrentCoverInfo?.LastCover is CustomNavigationPoint cover)
                 {
                     float dist = Vector3.Distance(_bot.Position, cover.Position);
@@ -271,8 +304,9 @@ namespace AIRefactored.AI.Movement
                     }
                 }
 
+                // Combat overlays: bots with high caution or "camper" personalities crouch in combat
                 bool inCombat = _cache.Combat?.IsInCombatState() == true;
-                bool prefersCrouch = _personality.Caution > 0.61f || _personality.IsCamper;
+                bool prefersCrouch = _personality.Caution > 0.62f || _personality.IsCamper;
 
                 if (inCombat && prefersCrouch)
                 {
@@ -316,7 +350,7 @@ namespace AIRefactored.AI.Movement
         {
             _anticipateNext = true;
             _anticipateOffset = UnityEngine.Random.Range(-AnticipatePoseJitter, AnticipatePoseJitter);
-            _anticipateUntil = Time.time + UnityEngine.Random.Range(0.18f, 0.26f);
+            _anticipateUntil = Time.time + UnityEngine.Random.Range(0.18f, 0.29f);
         }
 
         /// <summary>

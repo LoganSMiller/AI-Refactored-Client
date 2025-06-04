@@ -34,9 +34,10 @@ namespace AIRefactored.AI.Movement
         private float _nextLeanTime, _leanHoldUntil, _leanLockoutUntil;
         private BotTiltType _currentLean;
 
-        private const float LeanCooldownMin = 0.85f, LeanCooldownMax = 1.4f;
-        private const float LeanHoldMin = 1.0f, LeanHoldMax = 1.6f;
-        private const float CoverRayLength = 1.8f;
+        private const float LeanCooldownMin = 0.87f, LeanCooldownMax = 1.42f;
+        private const float LeanHoldMin = 0.92f, LeanHoldMax = 1.57f;
+        private const float CoverRayLength = 1.78f;
+        private const float OverlayRayHeight = 1.48f;
 
         /// <summary>
         /// Attaches and initializes overlay/event-driven pose and movement overlays for this bot.
@@ -49,6 +50,8 @@ namespace AIRefactored.AI.Movement
 
             _nextLeanTime = Time.time + UnityEngine.Random.Range(LeanCooldownMin, LeanCooldownMax);
             _currentLean = BotTiltType.right;
+            _leanHoldUntil = 0f;
+            _leanLockoutUntil = 0f;
 
             BotMovementHelper.Reset(_bot);
         }
@@ -63,6 +66,7 @@ namespace AIRefactored.AI.Movement
 
             TryLeanOverlay();
             TryLookOverlay();
+            // Future overlays (strafe, anticipation, formation pose, etc.) can be layered here, never issuing moves.
         }
 
         /// <summary>
@@ -74,6 +78,8 @@ namespace AIRefactored.AI.Movement
                 return;
 
             float now = Time.time;
+
+            // Enforce lean cooldowns, hold times, and lockouts to avoid lean spam.
             if (now < _nextLeanTime || now < _leanLockoutUntil || now < _leanHoldUntil)
                 return;
 
@@ -84,8 +90,9 @@ namespace AIRefactored.AI.Movement
                 return;
             }
 
-            bool leftCover = Physics.Raycast(_bot.Position + Vector3.up * 1.5f, -_bot.Transform.right, CoverRayLength, AIRefactoredLayerMasks.CoverRayMask);
-            bool rightCover = Physics.Raycast(_bot.Position + Vector3.up * 1.5f, _bot.Transform.right, CoverRayLength, AIRefactoredLayerMasks.CoverRayMask);
+            // Humanized cover-side lean: prefer left/right if one side has hard cover, else bias toward enemy.
+            bool leftCover = Physics.Raycast(_bot.Position + Vector3.up * OverlayRayHeight, -_bot.Transform.right, CoverRayLength, AIRefactoredLayerMasks.CoverRayMask);
+            bool rightCover = Physics.Raycast(_bot.Position + Vector3.up * OverlayRayHeight, _bot.Transform.right, CoverRayLength, AIRefactoredLayerMasks.CoverRayMask);
 
             BotTiltType desiredLean = BotTiltType.right;
             if (leftCover && !rightCover) desiredLean = BotTiltType.right;
@@ -97,6 +104,7 @@ namespace AIRefactored.AI.Movement
                     desiredLean = Vector3.Dot(toEnemy.normalized, _bot.Transform.right) > 0f ? BotTiltType.right : BotTiltType.left;
             }
 
+            // Only change lean if switching direction or hold expired, and always blend with a randomized cadence.
             if (_currentLean != desiredLean || now >= _leanHoldUntil)
             {
                 _currentLean = desiredLean;
@@ -105,7 +113,7 @@ namespace AIRefactored.AI.Movement
             }
 
             _nextLeanTime = now + UnityEngine.Random.Range(LeanCooldownMin, LeanCooldownMax);
-            _leanLockoutUntil = now + UnityEngine.Random.Range(0.3f, 0.6f);
+            _leanLockoutUntil = now + UnityEngine.Random.Range(0.31f, 0.61f);
         }
 
         /// <summary>
@@ -132,7 +140,7 @@ namespace AIRefactored.AI.Movement
             if (!NavMesh.SamplePosition(lookTarget, out NavMeshHit hit, 1.5f, NavMesh.AllAreas))
                 return;
 
-            Vector3 direction = hit.position - (_bot.Position + Vector3.up * 1.5f);
+            Vector3 direction = hit.position - (_bot.Position + Vector3.up * OverlayRayHeight);
             if (direction.sqrMagnitude < 0.01f) return;
 
             // Overlay only: Clamp frequency or intent use here if needed for further spam safety.
@@ -152,8 +160,7 @@ namespace AIRefactored.AI.Movement
             // Global dedupe/cooldown (matches BotMoveCache and BotMovementHelper logic)
             if (_moveCache.CanIssueMove(target, now))
             {
-                _moveCache.LastIssuedTarget = target;
-                _moveCache.LastMoveTime = now;
+                _moveCache.AuditMove(target, now, "ForceMove");
                 BotMovementHelper.SmoothMoveToSafe(_bot, target, slow, cohesion);
             }
         }

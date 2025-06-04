@@ -40,7 +40,7 @@ namespace AIRefactored.AI.Combat
         private const float PanicMisfireChance = 0.08f;
         private const float SquadFireEchoChance = 0.22f;
         private const float FriendlyFirePreventionAngle = 11.5f;
-        private const float OverlayMoveDedupSqr = 0.0001f; // anti-teleport dedup
+        private const float OverlayMoveDedupSqr = 0.0001f;
 
         private static readonly EBodyPart[] AllBodyParts = (EBodyPart[])Enum.GetValues(typeof(EBodyPart));
         private static readonly PlayerBoneType[] PreferredBones =
@@ -69,8 +69,6 @@ namespace AIRefactored.AI.Combat
         private float _voiceCalloutMinInterval = 2.2f;
         private float _voiceCalloutMaxInterval = 7.5f;
         private float _lastVoiceCalloutTime = -10f;
-
-        // Overlay Move Fix
         private Vector3 _lastOverlayMoveIssued = Vector3.zero;
         private float _lastOverlayMoveTime = -10f;
 
@@ -123,21 +121,21 @@ namespace AIRefactored.AI.Combat
                 float weaponRange = EstimateWeaponRange(weapon);
                 float maxRange = Mathf.Min(profile.EngagementRange, weaponRange, 200f);
 
-                // --- Overlay Movement (Event/Intent Only) ---
+                // --- Overlay Movement (Advance/Intent-Only, Fully Event-Driven) ---
                 if (distance > maxRange)
                 {
-                    // Never move if paused, in interaction, or just did an overlay move.
+                    // Only overlay/event-driven intent; never per-frame/tick-move, always through movement helper.
                     if (profile.ChaosFactor > 0f && UnityEngine.Random.value < profile.ChaosFactor * 0.7f)
                     {
                         if (BotNavHelper.TryGetSafeTarget(_bot, out var advance) && IsVectorValid(advance))
                         {
-                            // Dedup and cooldown overlay intent moves (intent/overlay only, never per-frame).
                             float overlayMoveCooldown = 0.46f;
                             if ((_lastOverlayMoveIssued - advance).sqrMagnitude > OverlayMoveDedupSqr &&
                                 time - _lastOverlayMoveTime > overlayMoveCooldown &&
                                 !BotMovementHelper.IsMovementPaused(_bot) &&
                                 !BotMovementHelper.IsInInteractionState(_bot))
                             {
+                                // All movement: strictly through SmoothMoveToSafe, never direct assignment.
                                 BotMovementHelper.SmoothMoveToSafe(_bot, advance, slow: false, cohesion: 1f);
                                 _lastOverlayMoveIssued = advance;
                                 _lastOverlayMoveTime = time;

@@ -31,6 +31,7 @@ namespace AIRefactored.AI.Helpers
 
         #region Static Memory
 
+        // Cleared only on raid end. No persistence required.
         private static readonly Dictionary<string, float> CoverMemory = new Dictionary<string, float>(128);
 
         #endregion

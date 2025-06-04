@@ -82,7 +82,6 @@ namespace AIRefactored.AI.Helpers
                 cache = found;
                 return true;
             }
-
             return false;
         }
 
@@ -175,7 +174,6 @@ namespace AIRefactored.AI.Helpers
             {
                 return part._transform.Original;
             }
-
             return null;
         }
 

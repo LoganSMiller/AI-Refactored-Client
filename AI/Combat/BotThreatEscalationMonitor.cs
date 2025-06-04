@@ -74,6 +74,9 @@ namespace AIRefactored.AI.Combat
 
         #region Initialization
 
+        /// <summary>
+        /// Initializes the escalation monitor for a bot.
+        /// </summary>
         public void Initialize(BotOwner botOwner)
         {
             if (botOwner == null)
@@ -97,6 +100,9 @@ namespace AIRefactored.AI.Combat
 
         #region Main Tick
 
+        /// <summary>
+        /// Per-frame tick: checks for escalation, squad morale, and manages overlays and comms.
+        /// </summary>
         public void Tick(float time)
         {
             if (!IsValid() || time < _nextCheckTime)
@@ -122,6 +128,9 @@ namespace AIRefactored.AI.Combat
 
         #region Public API
 
+        /// <summary>
+        /// Notifies escalation monitor that a panic event was triggered.
+        /// </summary>
         public void NotifyPanicTriggered()
         {
             if (_panicStartTime < 0f)
@@ -183,6 +192,9 @@ namespace AIRefactored.AI.Combat
             return dead >= Mathf.CeilToInt(group.MembersCount * SquadMoraleCollapseThreshold);
         }
 
+        /// <summary>
+        /// Triggers escalation overlays: all moves anti-teleport, deduped, never double-issued, comms, and tuning.
+        /// </summary>
         private void EscalateBot(float time)
         {
             _hasEscalated = true;
@@ -196,15 +208,15 @@ namespace AIRefactored.AI.Combat
             ApplyEscalationTuning(_bot);
             ApplyPersonalityTuning(_bot);
 
-            // Overlay/event move: anti-hitch/anti-teleport, dedup, and cache guard
+            // Overlay/event move: strictly anti-hitch/anti-teleport/anti-double-issue (only route via movement helper)
             if (BotNavHelper.TryGetSafeTarget(_bot, out var navTarget) && IsVectorValid(navTarget))
             {
-                // Only issue move if not paused/interacting, not recently issued, and dedup passes
                 if (_bot.Mover != null &&
                     !BotMovementHelper.IsMovementPaused(_bot) &&
                     !BotMovementHelper.IsInInteractionState(_bot) &&
                     (_lastEscalationMoveIssued - navTarget).sqrMagnitude > EscalationOverlayMoveDedupSqr &&
-                    (Time.time - _lastEscalationMoveTime) > EscalationOverlayMoveCooldown)
+                    (Time.time - _lastEscalationMoveTime) > EscalationOverlayMoveCooldown &&
+                    !IsAnticipationActive(_bot))
                 {
                     float cohesion = BotRegistry.Get(_bot.ProfileId)?.Cohesion ?? 1f;
                     BotMovementHelper.SmoothMoveToSafe(_bot, navTarget, slow: false, cohesion);
@@ -212,7 +224,7 @@ namespace AIRefactored.AI.Combat
                     _lastEscalationMoveIssued = navTarget;
                     _lastEscalationMoveTime = Time.time;
                 }
-                // Else: do not update cache or cooldown if blocked
+                // Never update cache/cooldown if move was not issued.
             }
 
             if (_bot.BotTalk != null && time - _lastVoiceTime > VoiceIntervalMin)
@@ -221,6 +233,9 @@ namespace AIRefactored.AI.Combat
             }
         }
 
+        /// <summary>
+        /// Issues squad morale collapse voice comms if eligible.
+        /// </summary>
         private void TrySquadCollapseComms(float time)
         {
             if (_bot.BotTalk != null && time - _nextSquadVoiceTime > VoiceIntervalMax)
@@ -238,6 +253,9 @@ namespace AIRefactored.AI.Combat
             }
         }
 
+        /// <summary>
+        /// Issues an escalation voice phrase.
+        /// </summary>
         private void TrySayEscalationPhrase(float time)
         {
             try
@@ -252,6 +270,9 @@ namespace AIRefactored.AI.Combat
             }
         }
 
+        /// <summary>
+        /// Applies escalation tuning to bot settings.
+        /// </summary>
         private void ApplyEscalationTuning(BotOwner bot)
         {
             var file = bot?.Settings?.FileSettings;
@@ -271,6 +292,9 @@ namespace AIRefactored.AI.Combat
             }
         }
 
+        /// <summary>
+        /// Applies personality tuning to bot profile on escalation.
+        /// </summary>
         private void ApplyPersonalityTuning(BotOwner bot)
         {
             try
@@ -294,6 +318,9 @@ namespace AIRefactored.AI.Combat
 
         #region Validation
 
+        /// <summary>
+        /// Returns true if the bot is valid and AI controlled.
+        /// </summary>
         private bool IsValid()
         {
             try
@@ -309,6 +336,15 @@ namespace AIRefactored.AI.Combat
         private static bool IsVectorValid(Vector3 v)
         {
             return !float.IsNaN(v.x) && !float.IsNaN(v.y) && !float.IsNaN(v.z);
+        }
+
+        /// <summary>
+        /// Returns true if an anticipation/fakeout overlay/lock is currently active on the bot.
+        /// </summary>
+        private static bool IsAnticipationActive(BotOwner bot)
+        {
+            // Placeholder for future: Integrate with centralized anticipation/fakeout overlay lock manager if present.
+            return false;
         }
 
         #endregion

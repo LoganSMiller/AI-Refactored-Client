@@ -14,6 +14,10 @@ namespace AIRefactored.AI.Core
     using BepInEx.Logging;
     using EFT;
 
+    /// <summary>
+    /// Canonical cache registry for all AIRefactored bot component caches and owner attach points.
+    /// Guarantees correct order and bulletproof attach across client, headless, and FIKA.
+    /// </summary>
     public static class BotComponentCacheRegistry
     {
         #region Internal State
@@ -31,6 +35,9 @@ namespace AIRefactored.AI.Core
 
         #region Public API
 
+        /// <summary>
+        /// Returns or creates the canonical BotComponentCache for a valid BotOwner, ensuring safe owner attach.
+        /// </summary>
         public static BotComponentCache GetOrCreate(BotOwner bot)
         {
             if (!IsFullyValidBot(bot))
@@ -89,6 +96,9 @@ namespace AIRefactored.AI.Core
             }
         }
 
+        /// <summary>
+        /// Tries to get an existing cache for a BotOwner.
+        /// </summary>
         public static BotComponentCache TryGetExisting(BotOwner bot)
         {
             if (!IsFullyValidBot(bot))
@@ -144,6 +154,9 @@ namespace AIRefactored.AI.Core
             return TryGet(bot.Profile.Id, out cache);
         }
 
+        /// <summary>
+        /// Safely removes cache for a bot and all player mappings.
+        /// </summary>
         public static void Remove(BotOwner bot)
         {
             if (bot?.Profile?.Id == null)
@@ -162,6 +175,9 @@ namespace AIRefactored.AI.Core
             }
         }
 
+        /// <summary>
+        /// Clears all caches and player mappings. Use with care.
+        /// </summary>
         public static void ClearAll()
         {
             lock (Lock)

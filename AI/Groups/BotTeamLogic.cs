@@ -123,6 +123,7 @@ namespace AIRefactored.AI.Groups
 
         /// <summary>
         /// Broadcasts fallback/retreat to all squadmates (async, bulletproof).
+        /// Fallback moves are overlay/event-driven, strictly NavMesh/one-shot, never direct position, no teleport.
         /// </summary>
         public void BroadcastFallback(Vector3 retreatPoint)
         {
@@ -169,7 +170,7 @@ namespace AIRefactored.AI.Groups
         }
 
         /// <summary>
-        /// Regroups squadmates toward the squad center, NavMesh/one-shot, anti-spam.
+        /// Regroups squadmates toward the squad center, NavMesh/one-shot, anti-spam, anti-teleport.
         /// </summary>
         public void CoordinateMovement()
         {
@@ -204,10 +205,12 @@ namespace AIRefactored.AI.Groups
                 // One-shot movement: only issue if sufficiently different and cooldown passed
                 if ((target - _lastMoveTarget).sqrMagnitude > MinMoveDeltaSqr && now - _lastMoveTime > MoveCooldown)
                 {
+                    // NavMesh-validate, clamp Y, micro-drift, and never spam.
                     if (BotNavHelper.TryGetNavMeshSafePosition(target, _bot.Position, out Vector3 navSafe))
                     {
                         Vector3 drifted = BotMovementHelper.ApplyMicroDrift(navSafe, _bot.ProfileId, Time.frameCount,
                             BotRegistry.GetOrGenerate(_bot.ProfileId, PersonalityType.Balanced, _bot.Profile?.Info?.Settings?.Role ?? WildSpawnType.assault));
+                        // Movement always issued via helper—never raw move or teleport.
                         BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: 1f);
 
                         _lastMoveTarget = drifted;

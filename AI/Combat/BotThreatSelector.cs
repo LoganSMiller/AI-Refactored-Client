@@ -15,14 +15,15 @@ namespace AIRefactored.AI.Combat
     using AIRefactored.AI.Memory;
     using AIRefactored.AI.Navigation;
     using AIRefactored.Core;
+    using AIRefactored.Pools;
     using BepInEx.Logging;
     using EFT;
     using UnityEngine;
 
     /// <summary>
-    /// Selects and prioritizes enemy threats for a bot, factoring in memory, squad, and real-time data.
-    /// All logic is null-guarded and multiplayer/headless safe. No disables, no fallback AI, no allocs on hot path.
-    /// Overlay-movement intent is deduped and cooldown-clamped, never teleported or double-issued.
+    /// Selects and prioritizes threats using live data, bot memory, personality, and squad logic.
+    /// All overlay movement intents are deduped, cooldown-clamped, never double-issued or teleported.
+    /// Bulletproof: All failures locally isolated, never disables, multiplayer/headless safe.
     /// </summary>
     public sealed class BotThreatSelector
     {
@@ -40,7 +41,6 @@ namespace AIRefactored.AI.Combat
         private const float SuppressionPenalty = 12.9f;
         private const float PanicPenalty = 20f;
 
-        // Overlay move dedup
         private const float OverlayMoveDedupSqr = 0.0001f;
         private const float OverlayMoveCooldown = 0.46f;
 
@@ -57,7 +57,6 @@ namespace AIRefactored.AI.Combat
         private float _lastSwitchTime;
         private Player _target;
 
-        // Overlay move cache
         private Vector3 _lastThreatMoveIssued = Vector3.zero;
         private float _lastThreatMoveTime = -10f;
 
@@ -89,6 +88,9 @@ namespace AIRefactored.AI.Combat
 
         #region Tick
 
+        /// <summary>
+        /// Evaluates and updates bot threat targeting, scoring, fallback, and overlay-safe movement.
+        /// </summary>
         public void Tick(float time)
         {
             if (time < _nextEvalTime || _bot == null || _bot.IsDead)
@@ -96,9 +98,9 @@ namespace AIRefactored.AI.Combat
 
             _nextEvalTime = time + EvaluateCooldown;
 
+            List<Player> players = GameWorldHandler.GetAllAlivePlayers();
             try
             {
-                List<Player> players = GameWorldHandler.GetAllAlivePlayers();
                 if (players == null || players.Count == 0)
                     return;
 
@@ -142,6 +144,10 @@ namespace AIRefactored.AI.Combat
             {
                 _logger.LogError("[BotThreatSelector] Tick failed: " + ex);
             }
+            finally
+            {
+                TempListPool.Return(players);
+            }
         }
 
         #endregion
@@ -161,7 +167,6 @@ namespace AIRefactored.AI.Combat
                 if (dist < 12f)
                     score += CloseDistanceBonus;
 
-                // Squad assist bonus for focus fire
                 if (_bot.BotsGroup != null)
                 {
                     int count = _bot.BotsGroup.MembersCount;
@@ -239,6 +244,9 @@ namespace AIRefactored.AI.Combat
             }
         }
 
+        /// <summary>
+        /// Sets the current target and, if not moving, issues a deduped, anti-teleport overlay movement.
+        /// </summary>
         private void SetTarget(Player player, float time)
         {
             _target = player;
@@ -249,7 +257,6 @@ namespace AIRefactored.AI.Combat
                 if (_cache.TacticalMemory != null)
                     _cache.TacticalMemory.RecordEnemyPosition(EFTPlayerUtil.GetPosition(player), "Threat", player.ProfileId);
 
-                // Overlay movement: guard anticipation, dedup, and cooldown *before* issue
                 if (_cache.Movement != null && !_bot.Mover.IsMoving)
                 {
                     if (BotNavHelper.TryGetSafeTarget(_bot, out Vector3 safePos) && IsVectorValid(safePos))
@@ -257,13 +264,13 @@ namespace AIRefactored.AI.Combat
                         if (!BotMovementHelper.IsMovementPaused(_bot) &&
                             !BotMovementHelper.IsInInteractionState(_bot) &&
                             (_lastThreatMoveIssued - safePos).sqrMagnitude > OverlayMoveDedupSqr &&
-                            (Time.time - _lastThreatMoveTime) > OverlayMoveCooldown)
+                            (Time.time - _lastThreatMoveTime) > OverlayMoveCooldown &&
+                            !IsAnticipationActive(_bot))
                         {
-                            BotMovementHelper.SmoothMoveToSafe(_bot, safePos, slow: false, cohesion: 1f);
+                            BotMovementHelper.SmoothMoveToSafe(_bot, safePos, false, 1f);
                             _lastThreatMoveIssued = safePos;
                             _lastThreatMoveTime = Time.time;
                         }
-                        // If blocked, cache is not updated
                     }
                 }
             }
@@ -274,7 +281,6 @@ namespace AIRefactored.AI.Combat
         }
 
         public string GetTargetProfileId() => _target?.ProfileId ?? string.Empty;
-
         public void ResetTarget() => _target = null;
 
         #endregion
@@ -302,6 +308,15 @@ namespace AIRefactored.AI.Combat
         {
             return !float.IsNaN(v.x) && !float.IsNaN(v.y) && !float.IsNaN(v.z) &&
                    Mathf.Abs(v.x) < 10000f && Mathf.Abs(v.y) < 10000f && Mathf.Abs(v.z) < 10000f;
+        }
+
+        /// <summary>
+        /// Returns true if an anticipation/fakeout overlay/lock is currently active on the bot.
+        /// </summary>
+        private static bool IsAnticipationActive(BotOwner bot)
+        {
+            // Placeholder for future: integrate with anticipation/fakeout overlay lock manager if present.
+            return false;
         }
 
         #endregion

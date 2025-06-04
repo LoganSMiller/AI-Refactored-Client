@@ -42,6 +42,9 @@ namespace AIRefactored.AI.Core
             AssignedZone = "unknown";
         }
 
+        /// <summary>
+        /// Strictly initializes the AIRefactored bot owner, enforces overlay/move safety.
+        /// </summary>
         public void Initialize(BotOwner bot)
         {
             if (_isInitialized)
@@ -81,7 +84,7 @@ namespace AIRefactored.AI.Core
                     Logger.LogDebug($"[AIRefactoredBotOwner] SetOwner wired: {id}");
                 }
 
-                // Sync movement cache (movement deduplication/overlay safety)
+                // Sync movement cache (deduplication/overlay safety)
                 _cache.MoveCache?.Reset();
 
                 // Finalize personality assignment (strict, never disables)
@@ -94,7 +97,6 @@ namespace AIRefactored.AI.Core
 
                 _isInitialized = true;
                 Logger.LogDebug($"[AIRefactoredBotOwner] ✅ Initialized for: {bot.Profile?.Info?.Nickname ?? "Unnamed"}");
-                // REMOVED: _cache.OnOwnerAttached();
             }
             catch (Exception ex)
             {
@@ -102,6 +104,9 @@ namespace AIRefactored.AI.Core
             }
         }
 
+        /// <summary>
+        /// Assigns a preset personality profile by type.
+        /// </summary>
         public void InitProfile(PersonalityType type)
         {
             try
@@ -128,6 +133,9 @@ namespace AIRefactored.AI.Core
             }
         }
 
+        /// <summary>
+        /// Assigns a custom profile and personality name.
+        /// </summary>
         public void InitProfile(BotPersonalityProfile profile, string name)
         {
             try
@@ -152,6 +160,9 @@ namespace AIRefactored.AI.Core
             }
         }
 
+        /// <summary>
+        /// Clears current personality profile to safe fallback.
+        /// </summary>
         public void ClearPersonality()
         {
             try

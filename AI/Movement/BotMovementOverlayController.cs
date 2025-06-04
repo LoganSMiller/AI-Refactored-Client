@@ -15,9 +15,9 @@ namespace AIRefactored.AI.Movement
     using UnityEngine;
 
     /// <summary>
-    /// Overlay/event-only controller.
-    /// No move/path commands issued here; only overlays (look, pose, anticipation, lean).
-    /// All movement is handled by EFT internal path/nav logic.
+    /// Overlay/event-only controller: handles pose, anticipation, lean, micro-jitter overlays.
+    /// Never issues any move/path/NavMesh command. All movement is handled by EFT internal path/nav logic.
+    /// Bulletproof: error-isolated, pooled, multiplayer/headless parity.
     /// </summary>
     public sealed class BotMovementOverlayController
     {
@@ -51,8 +51,14 @@ namespace AIRefactored.AI.Movement
                     return;
 
                 // Overlay/event-only logic here.
-                // Example: In future, overlay pose anticipation, micro-jitter, idle lean, or look overlays.
-                // All movement/path/NavMesh commands strictly forbidden.
+                // (Example usage below—expand with new overlays as needed.)
+
+                // Overlay: Subtle pose anticipation or body shift before actual movement (never moves).
+                // Overlay: Micro-jitter, simulating human "foot fidget" or lean anticipation.
+                // Overlay: Idle lean or subtle head tilt (no movement issued).
+                // Overlay: Idle scan/eye movement overlays (never triggers path/nav).
+
+                // DO NOT issue any actual move/path/GoTo command here, ever.
             }
             catch (Exception ex)
             {
@@ -61,6 +67,6 @@ namespace AIRefactored.AI.Movement
         }
 
         // Overlay helpers (e.g., ApplyMicroJitter, PoseAnticipation, IdleLean) can be implemented here as needed.
-        // No movement or pathing logic may ever be included in this controller.
+        // Never add any movement or pathing logic in this controller—only overlays.
     }
 }
