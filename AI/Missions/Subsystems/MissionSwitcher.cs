@@ -23,6 +23,7 @@ namespace AIRefactored.AI.Missions.Subsystems
     /// <summary>
     /// Dynamically selects bot mission types using squad, loot, threat, and personality context.
     /// No movement or side effects outside mission type change. All errors bulletproofed and pooled.
+    /// Overlay/event-driven, multiplayer/headless safe, pooled, squad- and profile-aware.
     /// </summary>
     public sealed class MissionSwitcher
     {
@@ -68,6 +69,7 @@ namespace AIRefactored.AI.Missions.Subsystems
         /// <summary>
         /// Evaluates bot state and decides whether to switch mission type.
         /// Overlay/event-only. No movement or direct state mutation outside mission type change.
+        /// Fully bulletproof, multiplayer/headless/squad/profile safe.
         /// </summary>
         public void Evaluate(
             ref MissionType currentMission,
@@ -78,7 +80,7 @@ namespace AIRefactored.AI.Missions.Subsystems
         {
             try
             {
-                // Deep null and safety guards
+                // Full null and safety guards, bulletproof against all profile/cache errors.
                 if (_bot == null || _cache == null || _profile == null || _bot.IsDead || _bot.GetPlayer == null || !_bot.GetPlayer.IsAI)
                     return;
 
@@ -87,7 +89,7 @@ namespace AIRefactored.AI.Missions.Subsystems
 
                 string name = _bot.Profile?.Info?.Nickname ?? "Unknown";
 
-                // Escalate to Fight if under fire + aggressive profile
+                // Escalate to Fight if under fire + aggressive profile.
                 if (_bot.Memory?.IsUnderFire == true &&
                     _profile.AggressionLevel > 0.6f &&
                     currentMission != MissionType.Fight)
@@ -95,11 +97,13 @@ namespace AIRefactored.AI.Missions.Subsystems
                     currentMission = MissionType.Fight;
                     _lastSwitchTime = time;
                     switchToFight?.Invoke();
+#if DEBUG
                     _log.LogDebug($"[MissionSwitcher] {name} escalating → Fight (under fire + aggressive)");
+#endif
                     return;
                 }
 
-                // Switch to Loot if questing, loot-driven, and high-value loot is present
+                // Switch to Loot if questing, loot-driven, and high-value loot is present.
                 if (currentMission == MissionType.Quest &&
                     _profile.PreferredMission == MissionBias.Loot &&
                     _lootDecision?.ShouldLootNow() == true)
@@ -109,12 +113,14 @@ namespace AIRefactored.AI.Missions.Subsystems
                     {
                         currentMission = MissionType.Loot;
                         _lastSwitchTime = time;
+#if DEBUG
                         _log.LogDebug($"[MissionSwitcher] {name} switching → Loot (loot nearby)");
+#endif
                         return;
                     }
                 }
 
-                // Revert to Quest if squad is lost during fight
+                // Revert to Quest if squad is lost during fight.
                 if (currentMission == MissionType.Fight &&
                     isGroupAligned != null &&
                     !isGroupAligned())
@@ -122,7 +128,9 @@ namespace AIRefactored.AI.Missions.Subsystems
                     currentMission = MissionType.Quest;
                     _lastSwitchTime = time;
                     resumeQuesting?.Invoke();
+#if DEBUG
                     _log.LogDebug($"[MissionSwitcher] {name} fallback → Quest (squad separated)");
+#endif
                 }
             }
             catch (Exception ex)

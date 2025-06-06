@@ -25,7 +25,7 @@ namespace AIRefactored.AI.Missions.Subsystems
 
     /// <summary>
     /// Controls *intent* and tactical routing for bot missions.
-    /// Never issues real movement. All intent is for overlay/event pickup only.
+    /// Emits only overlay/event intent (never issues movement).
     /// Bulletproof, squad broadcast-safe, pooled, never disables itself or squad.
     /// </summary>
     public sealed class ObjectiveController
@@ -41,6 +41,9 @@ namespace AIRefactored.AI.Missions.Subsystems
         private Vector3 _lastBroadcastedObjective;
         private float _lastBroadcastTime;
 
+        /// <summary>
+        /// The current intent objective (for overlay/dispatcher pickup).
+        /// </summary>
         public Vector3 CurrentObjective { get; private set; }
 
         #endregion
@@ -131,6 +134,7 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         /// <summary>
         /// Selects the current target for the mission overlay (quest, fight, loot, fallback: self).
+        /// Never issues a move.
         /// </summary>
         private Vector3 GetObjectiveTarget(MissionType type)
         {
@@ -256,7 +260,7 @@ namespace AIRefactored.AI.Missions.Subsystems
             {
                 _lastBroadcastedObjective = obj;
                 _lastBroadcastTime = now;
-                // Place overlay/event-only group comms logic here.
+                // Overlay/event-only squad comms go here (no move allowed).
             }
         }
 

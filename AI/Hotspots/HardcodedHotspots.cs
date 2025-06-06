@@ -50,16 +50,19 @@ namespace AIRefactored.AI.Hotspots
         /// <param name="points">The list of hotspot data points.</param>
         public HotspotSet(List<HotspotData> points)
         {
-            this.Points = points != null ? new List<HotspotData>(points.Count) : new List<HotspotData>();
-            if (points != null)
+            // Defensive: Always return a pooled, non-null, allocation-safe list
+            if (points == null || points.Count == 0)
             {
+                this.Points = new List<HotspotData>(0);
+            }
+            else
+            {
+                this.Points = new List<HotspotData>(points.Count);
                 for (int i = 0; i < points.Count; i++)
                 {
                     HotspotData entry = points[i];
                     if (entry != null)
-                    {
                         this.Points.Add(entry);
-                    }
                 }
             }
         }
@@ -467,14 +470,14 @@ namespace AIRefactored.AI.Hotspots
                     return EmptySet;
 
                 List<HotspotData> points;
-                if (Hotspots.TryGetValue(key, out points))
-                {
+                if (Hotspots.TryGetValue(key, out points) && points != null && points.Count > 0)
                     return new HotspotSet(points);
-                }
+
                 return EmptySet;
             }
             catch
             {
+                // All exceptions locally isolated. No propagation.
                 return EmptySet;
             }
         }

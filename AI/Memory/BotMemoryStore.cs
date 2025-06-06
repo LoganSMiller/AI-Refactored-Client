@@ -15,8 +15,10 @@ namespace AIRefactored.AI.Memory
     using UnityEngine;
 
     /// <summary>
-    /// Centralized tactical memory for bots. Tracks short-term audio, hits, and local danger zones.
+    /// Centralized, atomic, bulletproof tactical memory for bots. 
+    /// Tracks short-term audio, hits, and local danger zones for overlay/event logic.
     /// All failures are locally isolated; memory logic cannot break other subsystems or the mod.
+    /// Arbitration/event-move overlay is handled externally.
     /// </summary>
     public static class BotMemoryStore
     {
@@ -35,6 +37,9 @@ namespace AIRefactored.AI.Memory
 
         #region Danger Zones
 
+        /// <summary>
+        /// Adds a new danger zone for the given map. Truncates oldest if limit exceeded.
+        /// </summary>
         public static void AddDangerZone(string mapId, Vector3 position, DangerTriggerType type, float radius)
         {
             try
@@ -51,6 +56,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Gets pooled list of current (not expired) danger zones for a map.
+        /// </summary>
         public static List<DangerZone> GetZonesForMap(string mapId)
         {
             var result = TempListPool.Rent<DangerZone>();
@@ -85,6 +93,9 @@ namespace AIRefactored.AI.Memory
             return result;
         }
 
+        /// <summary>
+        /// Returns true if the position is within any current danger zone for the given map.
+        /// </summary>
         public static bool IsPositionInDangerZone(string mapId, Vector3 position)
         {
             try
@@ -109,6 +120,9 @@ namespace AIRefactored.AI.Memory
             return false;
         }
 
+        /// <summary>
+        /// Clears all danger zones and pooled caches.
+        /// </summary>
         public static void ClearZones()
         {
             try
@@ -128,6 +142,9 @@ namespace AIRefactored.AI.Memory
 
         #region Audio Memory
 
+        /// <summary>
+        /// Adds a heard sound to the bot's short-term memory.
+        /// </summary>
         public static void AddHeardSound(string profileId, Vector3 position, float time)
         {
             try
@@ -147,6 +164,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Tries to get the most recently heard sound for this bot.
+        /// </summary>
         public static bool TryGetHeardSound(string profileId, out HeardSound sound)
         {
             sound = default;
@@ -161,6 +181,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Clears short-term sound memory for this bot.
+        /// </summary>
         public static void ClearHeardSound(string profileId)
         {
             try
@@ -177,6 +200,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Clears all heard sound memory for all bots.
+        /// </summary>
         public static void ClearAllHeardSounds()
         {
             try
@@ -195,6 +221,9 @@ namespace AIRefactored.AI.Memory
 
         #region Hit Tracking
 
+        /// <summary>
+        /// Registers the most recent hit source (attacker) for a given bot.
+        /// </summary>
         public static void RegisterLastHitSource(string victimProfileId, string attackerProfileId)
         {
             try
@@ -210,6 +239,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Returns true if victim was recently hit by the given attacker.
+        /// </summary>
         public static bool WasRecentlyHitBy(string victimProfileId, string attackerProfileId)
         {
             try
@@ -228,6 +260,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Clears all hit source memory.
+        /// </summary>
         public static void ClearHitSources()
         {
             try
@@ -244,6 +279,9 @@ namespace AIRefactored.AI.Memory
 
         #region Flank Cooldown
 
+        /// <summary>
+        /// Sets the last time this bot attempted a flank (by profile).
+        /// </summary>
         public static void SetLastFlankTime(string profileId)
         {
             try
@@ -257,6 +295,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Returns true if the bot's flank cooldown has expired.
+        /// </summary>
         public static bool CanFlankNow(string profileId, float cooldown)
         {
             try
@@ -271,6 +312,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Clears all flank cooldowns for all bots.
+        /// </summary>
         public static void ClearFlankCooldowns()
         {
             try
@@ -287,13 +331,15 @@ namespace AIRefactored.AI.Memory
 
         #region Player Awareness
 
+        /// <summary>
+        /// Returns a pooled list of real (non-bot) players near a given position.
+        /// </summary>
         public static List<Player> GetNearbyPlayers(Vector3 origin, float radius)
         {
             List<Player> result = TempListPool.Rent<Player>();
             List<Player> players = GameWorldHandler.GetAllAlivePlayers();
             try
             {
-
                 float radiusSqr = radius * radius;
                 for (int i = 0; i < players.Count; i++)
                 {
@@ -317,7 +363,6 @@ namespace AIRefactored.AI.Memory
                 TempListPool.Return(players);
             }
             return result;
-
         }
 
         #endregion

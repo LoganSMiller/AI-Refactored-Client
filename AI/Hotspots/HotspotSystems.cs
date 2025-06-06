@@ -21,8 +21,9 @@ namespace AIRefactored.AI.Hotspots
     using UnityEngine.AI;
 
     /// <summary>
-    /// Handles squad-aware hotspot patrol and defense for AI-Refactored bots.
-    /// Full tactical and personality awareness, error isolation, and BotBrain-safe overlays.
+    /// Handles squad-aware, arbitration/overlay-driven hotspot patrol/defense for AI-Refactored bots.
+    /// All overlays are pooled, deduped, squad/personality/navmesh safe, anti-teleport, error-isolated.
+    /// Multiplayer/headless/client parity.
     /// </summary>
     public sealed class HotspotSystem
     {
@@ -31,6 +32,9 @@ namespace AIRefactored.AI.Hotspots
 
         private readonly Dictionary<BotOwner, HotspotSession> _sessions = new Dictionary<BotOwner, HotspotSession>(64);
 
+        /// <summary>
+        /// Call on raid/world init to reset and reinit registry and sessions.
+        /// </summary>
         public void Initialize()
         {
             _sessions.Clear();
@@ -38,6 +42,9 @@ namespace AIRefactored.AI.Hotspots
             HotspotRegistry.Initialize(map ?? string.Empty);
         }
 
+        /// <summary>
+        /// Call once per tick via BotBrain overlay/event dispatcher. Never per-frame/coroutine.
+        /// </summary>
         public void Tick()
         {
             try
@@ -65,10 +72,10 @@ namespace AIRefactored.AI.Hotspots
                         }
                         session?.Tick();
                     }
-                    catch { }
+                    catch { /* Bulletproof per-bot */ }
                 }
             }
-            catch { }
+            catch { /* Bulletproof all-system */ }
         }
 
         private HotspotSession TryAssignRoute(BotOwner bot)
@@ -130,6 +137,10 @@ namespace AIRefactored.AI.Hotspots
 
         #region HotspotSession
 
+        /// <summary>
+        /// Tracks a bot's squad-aware hotspot patrol/defense overlay session.
+        /// Fully pooled, arbitration-guarded, NavMesh validated, zero-alloc.
+        /// </summary>
         private sealed class HotspotSession
         {
             private const float BaseDefendRadius = 7f;
@@ -165,21 +176,23 @@ namespace AIRefactored.AI.Hotspots
                     if (_bot.GetPlayer?.HealthController is HealthControllerClass hc)
                         hc.ApplyDamageEvent += OnDamage;
                 }
-                catch { }
+                catch { /* Bulletproof attach */ }
             }
 
+            /// <summary>
+            /// Overlay-driven, arbitration-safe, anti-teleport patrol/defend tick.
+            /// </summary>
             public void Tick()
             {
                 if (!EFTPlayerUtil.IsValidBotOwner(_bot) || _route.Count == 0 || _bot.GetPlayer.IsYourPlayer)
                     return;
 
-                // Skip movement if in combat or recently damaged
+                // Skip move if in combat or recently damaged (realistic hesitation).
                 if (_bot.Memory?.GoalEnemy != null || Time.time - _lastHitTime < DamageCooldown)
                     return;
 
                 Vector3 dest = _route[_index].Position;
                 if (!IsValid(dest)) return;
-
                 if (!NavMesh.SamplePosition(dest, out var navHit, NavSampleRadius, NavMesh.AllAreas)) return;
 
                 Vector3 safeTarget = navHit.position;
@@ -188,12 +201,16 @@ namespace AIRefactored.AI.Hotspots
                 float now = Time.time;
                 float dist = Vector3.Distance(_bot.Position, safeTarget);
 
-                // Intent/overlay-based, deduped, cooldown
+                // Overlay arbitration: one intent per tick, never tick-move.
                 if (_isDefender)
                 {
                     float radius = BaseDefendRadius * Mathf.Clamp(1f + (1f - (_cache?.PanicHandler?.GetComposureLevel() ?? 1f)), 1f, 2.1f);
                     if (dist > radius && (now - _lastMoveTime > MoveCooldown || (_lastMoveTarget - safeTarget).sqrMagnitude > 0.25f))
                     {
+                        // Arbitration: Only move if arbitration grants Medical/Patrol overlay (never spam).
+                        if (!BotOverlayManager.CanIssueMove(_bot, BotOverlayType.Patrol))
+                            return;
+
                         Vector3 drifted = BotMovementHelper.ApplyMicroDrift(
                             safeTarget,
                             _bot.ProfileId,
@@ -203,6 +220,7 @@ namespace AIRefactored.AI.Hotspots
                         if (BotMovementHelper.ShouldMove(_bot, drifted))
                         {
                             BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: 1f);
+                            BotOverlayManager.RegisterMove(_bot, BotOverlayType.Patrol);
                             _lastMoveTarget = drifted;
                             _lastMoveTime = now;
                         }
@@ -218,6 +236,9 @@ namespace AIRefactored.AI.Hotspots
 
                     if (now - _lastMoveTime > MoveCooldown || (_lastMoveTarget - safeTarget).sqrMagnitude > 0.25f)
                     {
+                        if (!BotOverlayManager.CanIssueMove(_bot, BotOverlayType.Patrol))
+                            return;
+
                         Vector3 jittered = AddJitter(safeTarget);
                         Vector3 drifted = BotMovementHelper.ApplyMicroDrift(
                             jittered,
@@ -228,6 +249,7 @@ namespace AIRefactored.AI.Hotspots
                         if (BotMovementHelper.ShouldMove(_bot, drifted))
                         {
                             BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: 1f);
+                            BotOverlayManager.RegisterMove(_bot, BotOverlayType.Patrol);
                             _lastMoveTarget = drifted;
                             _lastMoveTime = now;
                         }

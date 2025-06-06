@@ -19,7 +19,8 @@ namespace AIRefactored.AI.Looting
 
     /// <summary>
     /// Scans for loot containers, evaluates value, arbitrates squad loot, and surfaces loot positions.
-    /// 100% tick-driven, pooled, squad-aware. No hot path allocation, no fallback disables.
+    /// 100% BotBrain tick-driven, pooled, squad-aware. No hot path allocation, no fallback disables.
+    /// All logic is error-guarded, multiplayer/headless safe, and never disables overlay/event systems.
     /// </summary>
     public sealed class BotLootScanner
     {
@@ -53,6 +54,8 @@ namespace AIRefactored.AI.Looting
             _squadLootClaimId = null;
             _squadLootTarget = Vector3.zero;
             _squadLootClaimTime = -99f;
+            TotalLootValue = 0f;
+            CurrentTargetContainer = null;
         }
 
         #endregion
@@ -72,7 +75,10 @@ namespace AIRefactored.AI.Looting
                 ScanNearbyContainers();
                 EvaluateBestLoot();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Plugin.LoggerInstance.LogError($"[BotLootScanner] Tick failed: {ex}");
+            }
         }
 
         #endregion
@@ -115,7 +121,7 @@ namespace AIRefactored.AI.Looting
         /// </summary>
         public string GetSquadClaimedLootId()
         {
-            if (_squadLootClaimId != null && (Time.time - _squadLootClaimTime) < 12f)
+            if (!string.IsNullOrEmpty(_squadLootClaimId) && (Time.time - _squadLootClaimTime) < 12f)
                 return _squadLootClaimId;
             return null;
         }
@@ -212,7 +218,10 @@ namespace AIRefactored.AI.Looting
                         total += item.Template.CreditsPrice;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Plugin.LoggerInstance.LogError($"[BotLootScanner] EstimateValue failed: {ex}");
+            }
             _tempItems.Clear();
             return total;
         }

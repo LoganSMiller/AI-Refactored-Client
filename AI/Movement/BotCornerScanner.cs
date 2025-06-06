@@ -111,18 +111,17 @@ namespace AIRefactored.AI.Movement
                     return;
                 }
 
-                // Edge detection: no movement, only overlays.
+                // Edge detection: overlays only, never movement.
                 if (IsApproachingEdge())
                 {
-                    // Optional: Add a small lean or shoulder pose overlay for realism, no pause.
                     TryEdgeLean(time);
                 }
 
-                // Wall/corner scan logic: lean/crouch only.
+                // Wall/corner scan: overlays only.
                 if (TryCornerPeekWithCrouch(time))
                     return;
 
-                // Human-like idle look/scan at corners (no movement).
+                // Idle scan/peek overlays (never movement).
                 if (!_scanInProgress && time > _lastScanTime + ScanCooldown)
                     StartIdleScan(time);
                 else if (_scanInProgress)

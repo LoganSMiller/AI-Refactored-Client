@@ -21,8 +21,8 @@ namespace AIRefactored.AI.Missions
 
     /// <summary>
     /// Handles human-like, bulletproof extraction/retreat for bots, squad- and context-aware.
-    /// All logic is event/intent only: emits extraction intent, never issues direct moves. 
-    /// All failures are locally isolated, path-based, no disables or teleportation. FIKA/SPT/headless safe.
+    /// Emits overlay intent only—never issues real movement. 
+    /// All failures locally isolated, path-based, no disables or teleportation. FIKA/SPT/headless safe.
     /// </summary>
     public sealed class BotExtractionDecisionSystem
     {
@@ -76,10 +76,10 @@ namespace AIRefactored.AI.Missions
 
         #endregion
 
-        #region Tick Logic
+        #region Overlay Tick
 
         /// <summary>
-        /// Main per-tick extraction logic. Emits extraction intent only (overlay/event), no direct movement.
+        /// Main per-tick extraction logic. Emits extraction intent only (overlay/event), never issues movement.
         /// </summary>
         public void Tick(float now)
         {
@@ -96,7 +96,8 @@ namespace AIRefactored.AI.Missions
                     _lastExtractDecisionTime = now;
                     ExtractionIntentTarget = FindExtractionIntentTarget();
                     _hasExtracted = ExtractionIntentTarget != Vector3.zero;
-                    // Overlay/dispatcher must pick up ExtractionIntentTarget and route real moves.
+
+                    // Dispatcher must pick up ExtractionIntentTarget and handle actual movement overlay.
                     _cache?.TacticalMemory?.MarkForcedExtract();
                 }
             }
@@ -108,7 +109,7 @@ namespace AIRefactored.AI.Missions
 
         #endregion
 
-        #region Decision Logic
+        #region Extraction Decision Logic
 
         /// <summary>
         /// Returns true if this bot should extract at the current time. 
@@ -162,7 +163,7 @@ namespace AIRefactored.AI.Missions
         #region Overlay Extraction Intent Logic
 
         /// <summary>
-        /// Finds the best extraction point (overlay intent only, never moves directly).
+        /// Finds the best extraction point (overlay intent only, never issues a move).
         /// </summary>
         private Vector3 FindExtractionIntentTarget()
         {
@@ -174,6 +175,7 @@ namespace AIRefactored.AI.Missions
                     return BotMovementHelper.ApplyMicroDrift(exfilTarget, _bot.ProfileId, Time.frameCount, _profile);
                 }
 
+                // Fallback: find a safe NavMesh fallback (squad/cover/overlay planner).
                 if (BotNavHelper.TryGetSafeTarget(_bot, out Vector3 fallback) && BotNavHelper.IsNavMeshPositionValid(fallback))
                 {
                     return BotMovementHelper.ApplyMicroDrift(fallback, _bot.ProfileId, Time.frameCount, _profile);

@@ -14,15 +14,16 @@ namespace AIRefactored.AI.Helpers
     using AIRefactored.AI.Missions;
     using AIRefactored.AI.Movement;
     using AIRefactored.Core;
+    using AIRefactored.Pools;
     using AIRefactored.Runtime;
     using BepInEx.Logging;
     using EFT;
     using UnityEngine;
 
     /// <summary>
-    /// Centralized, bulletproof registry for all bot component caches.
-    /// All operations are triple-error-guarded, race-free, zero-cascade, and 100% environment safe.
-    /// Fully supports dynamic attach, teardown, late join, and multi-raid.
+    /// Centralized, bulletproof, pooled registry for all AIRefactored bot component caches.
+    /// Hardened for multiplayer, FIKA headless, dynamic attach/teardown, race-free, error-contained.
+    /// Registry always recovers from attach, teardown, rejoin, and multi-raid; zero cascade or fallback disables.
     /// </summary>
     public static class BotCacheUtility
     {
@@ -41,7 +42,7 @@ namespace AIRefactored.AI.Helpers
         #region Public API
 
         /// <summary>
-        /// Enumerates all currently active bot caches (bulletproof; only live bots; multi-raid safe).
+        /// Enumerates all currently active and valid bot caches (bulletproof; only live bots; multi-raid safe).
         /// </summary>
         public static IEnumerable<BotComponentCache> AllActiveBots()
         {
@@ -157,7 +158,6 @@ namespace AIRefactored.AI.Helpers
                     best = pair.Value;
                 }
             }
-
             return best;
         }
 

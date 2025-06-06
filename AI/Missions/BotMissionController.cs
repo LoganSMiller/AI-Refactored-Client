@@ -20,7 +20,8 @@ namespace AIRefactored.AI.Missions
 
     /// <summary>
     /// Drives bot missions, objectives, and squad alignment.
-    /// All logic is error-contained, never disables, and is strictly ticked by BotBrain only.
+    /// All logic is overlay/event-driven, BotBrain-ticked, null-guarded, bulletproof, and squad-aligned.
+    /// No per-module tick, no movement, no disables; all failures locally isolated.
     /// </summary>
     public sealed class BotMissionController
     {
@@ -146,6 +147,7 @@ namespace AIRefactored.AI.Missions
 
                 _extraction.Tick(time);
 
+                // Squad rejoin/hold logic (never disables, only overlays)
                 if (!_evaluator.IsGroupAligned() && _missionType != MissionType.Fight)
                 {
                     if (_groupWaitStart < 0f)
@@ -161,6 +163,7 @@ namespace AIRefactored.AI.Missions
                     _groupWaitStart = -1f;
                 }
 
+                // Overlay-driven, event-only mission cooldown and transition
                 if (time - _lastUpdateTime > _missionCooldown)
                 {
                     _objectives.OnObjectiveReached(_missionType);
@@ -168,6 +171,7 @@ namespace AIRefactored.AI.Missions
                     _missionCooldown = GetNextCooldown();
                 }
 
+                // Loot sync: overlays only, no direct state change
                 if (!_inCombatPause &&
                     _missionType == MissionType.Loot &&
                     _cache.LootScanner != null &&
@@ -202,6 +206,9 @@ namespace AIRefactored.AI.Missions
             }
         }
 
+        /// <summary>
+        /// Overlay/event callback for objective reached (never disables, only overlays).
+        /// </summary>
         private void OnObjectiveReached(float now)
         {
             try
@@ -223,9 +230,10 @@ namespace AIRefactored.AI.Missions
                         return;
                     }
 
+                    // Overlay/event-only: no side-effects outside overlays.
                     _cache.Movement?.EnterLootingMode();
                     _cache.PoseController?.LockCrouchPose();
-                    _cache.DeadBodyScanner?.TryLootNearby(); // Overlay/event only
+                    _cache.DeadBodyScanner?.TryLootNearby();
                     _cache.Movement?.ExitLootingMode();
                     _voice.OnLoot();
                 }
@@ -238,6 +246,9 @@ namespace AIRefactored.AI.Missions
             }
         }
 
+        /// <summary>
+        /// Overlay/event callback for escalation to Fight state.
+        /// </summary>
         private void SwitchToFight()
         {
             try
@@ -262,6 +273,9 @@ namespace AIRefactored.AI.Missions
 
         #region Utility
 
+        /// <summary>
+        /// Returns a random overlay/event mission cooldown.
+        /// </summary>
         private float GetNextCooldown()
         {
             try

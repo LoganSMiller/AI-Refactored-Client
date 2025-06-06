@@ -20,6 +20,7 @@ namespace AIRefactored.AI.Memory
     /// Tactical enemy memory and zone clearing logic, bulletproof and BotBrain-driven.
     /// All expiry, zone, and sharing logic must be called via BotBrain.Tick().
     /// Never issues navigation or movement commands, overlay-only memory logic.
+    /// Fully pooled, squad-safe, and multiplayer/headless resilient.
     /// </summary>
     public sealed class BotTacticalMemory
     {
@@ -47,6 +48,9 @@ namespace AIRefactored.AI.Memory
 
         #region Initialization
 
+        /// <summary>
+        /// Initializes this tactical memory with the provided cache.
+        /// </summary>
         public void Initialize(BotComponentCache cache)
         {
             try { _cache = cache; }
@@ -57,6 +61,9 @@ namespace AIRefactored.AI.Memory
 
         #region BotBrain-Tick Management
 
+        /// <summary>
+        /// Call once per BotBrain.Tick(). Handles expiry and cleanup of memory.
+        /// </summary>
         public void Tick(float deltaTime)
         {
             CullExpired();
@@ -114,6 +121,9 @@ namespace AIRefactored.AI.Memory
 
         #region Memory Management
 
+        /// <summary>
+        /// Clears all tactical memory for this bot.
+        /// </summary>
         public void ClearAll()
         {
             try
@@ -133,6 +143,9 @@ namespace AIRefactored.AI.Memory
 
         #region Enemy Recording
 
+        /// <summary>
+        /// Records a new enemy position into tactical memory.
+        /// </summary>
         public void RecordEnemyPosition(Vector3 position, string tag, string enemyId)
         {
             try
@@ -166,6 +179,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Returns the most recently seen enemy position.
+        /// </summary>
         public Vector3 GetRecentEnemyMemory()
         {
             try
@@ -191,6 +207,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Returns the ID of the most recently seen enemy.
+        /// </summary>
         public string GetMostRecentEnemyId()
         {
             try
@@ -215,17 +234,26 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Returns a reference to all currently held enemy records (for read-only use).
+        /// </summary>
         public List<SeenEnemyRecord> GetAllMemory()
         {
             return _enemyMemoryList;
         }
 
+        /// <summary>
+        /// Records an ally-echoed enemy position into tactical memory (squad share).
+        /// </summary>
         public void SyncMemory(Vector3 position)
         {
             try { RecordEnemyPosition(position, "AllyEcho", string.Empty); }
             catch (Exception ex) { Logger.LogError($"[BotTacticalMemory] SyncMemory failed: {ex}"); }
         }
 
+        /// <summary>
+        /// Shares this bot's tactical memory with the specified teammates.
+        /// </summary>
         public void ShareMemoryWith(List<BotComponentCache> teammates)
         {
             try
@@ -254,12 +282,18 @@ namespace AIRefactored.AI.Memory
 
         #region Tactical Evaluation
 
+        /// <summary>
+        /// Marks the provided position as cleared (temporarily safe).
+        /// </summary>
         public void MarkCleared(Vector3 position)
         {
             try { _clearedSpots[SnapToGrid(position)] = Time.time; }
             catch (Exception ex) { Logger.LogError($"[BotTacticalMemory] MarkCleared failed: {ex}"); }
         }
 
+        /// <summary>
+        /// Returns true if this position was marked cleared recently.
+        /// </summary>
         public bool WasRecentlyCleared(Vector3 position)
         {
             try
@@ -274,6 +308,9 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Returns true if this position is currently unsafe due to enemy memory, cleared spots, or danger zone.
+        /// </summary>
         public bool IsZoneUnsafe(Vector3 position)
         {
             try
@@ -301,12 +338,18 @@ namespace AIRefactored.AI.Memory
             }
         }
 
+        /// <summary>
+        /// Marks this bot as starting extraction (forced).
+        /// </summary>
         public void MarkForcedExtract()
         {
             try { _extractionStarted = true; }
             catch (Exception ex) { Logger.LogError($"[BotTacticalMemory] MarkForcedExtract failed: {ex}"); }
         }
 
+        /// <summary>
+        /// Returns true if bot is currently extracting.
+        /// </summary>
         public bool IsExtracting()
         {
             try { return _extractionStarted; }

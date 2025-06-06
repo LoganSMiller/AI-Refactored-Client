@@ -24,9 +24,8 @@ namespace AIRefactored.AI.Missions.Subsystems
     using UnityEngine.AI;
 
     /// <summary>
-    /// Overlay-only mission intent logic: no tick-move, fully pooled, squad-aware, error-isolated.
-    /// All movement overlays/event handlers use the central helper, never assign raw vectors or direct cache.
-    /// Zero teleport, zero hitch, NavMesh-safe, multiplayer/headless parity.
+    /// Overlay-only mission intent logic: arbitration/event-only, pooled, squad-aware, error-isolated.
+    /// All movement overlays/event handlers use the central helper and overlay manager; zero tick-move, zero teleport, full multiplayer/headless parity.
     /// </summary>
     public sealed class MissionEvaluator
     {
@@ -102,6 +101,9 @@ namespace AIRefactored.AI.Missions.Subsystems
 
         #region Mission Checks
 
+        /// <summary>
+        /// Returns true if bot is sufficiently close to most squadmates (60%+ within cohesion range).
+        /// </summary>
         public bool IsGroupAligned()
         {
             try
@@ -136,6 +138,9 @@ namespace AIRefactored.AI.Missions.Subsystems
             }
         }
 
+        /// <summary>
+        /// Returns true if bot should extract early based on loot and personality.
+        /// </summary>
         public bool ShouldExtractEarly()
         {
             try
@@ -171,13 +176,16 @@ namespace AIRefactored.AI.Missions.Subsystems
         }
 
         /// <summary>
-        /// Overlay/event-based extraction attempt. Overlay-only; never sets position directly.
-        /// All move attempts route through the validated movement helper.
+        /// Overlay/event-based extraction attempt.
+        /// Uses arbitration and pooled movement; no position is set directly, always NavMesh/Y/dedup validated.
         /// </summary>
         public void TryExtract()
         {
             try
             {
+                if (!BotOverlayManager.CanIssueMove(_bot, BotOverlayType.Extract))
+                    return;
+
                 ExfiltrationPoint[] points = GameObject.FindObjectsOfType<ExfiltrationPoint>();
                 if (points == null || points.Length == 0)
                     return;
@@ -204,7 +212,12 @@ namespace AIRefactored.AI.Missions.Subsystems
                     NavMesh.SamplePosition(best.transform.position, out NavMeshHit hit, NavSampleRadius, AIRefactoredLayerMasks.NavMeshAll))
                 {
                     Vector3 drifted = BotMovementHelper.ApplyMicroDrift(hit.position, _bot.ProfileId, Time.frameCount, _profile);
+
+                    if (!BotMovementHelper.ShouldMove(_bot, drifted)) // Deduplication after drift.
+                        return;
+
                     BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: 1f);
+                    BotOverlayManager.RegisterMove(_bot, BotOverlayType.Extract);
 
                     if (_bot.BotTalk != null && UnityEngine.Random.value < 0.45f)
                     {
@@ -223,9 +236,8 @@ namespace AIRefactored.AI.Missions.Subsystems
         #region Stuck Detection
 
         /// <summary>
-        /// Overlay-only anti-stuck: triggers overlay fallback, never direct position set.
-        /// Bulletproof, pooled, overlay/event-driven only.
-        /// All fallback attempts route through the central movement helper.
+        /// Overlay-only anti-stuck: triggers fallback via overlay arbitration, never direct position set.
+        /// All fallback attempts route through the central movement helper and use triple arbitration/validation.
         /// </summary>
         public void UpdateStuckCheck(float time)
         {
@@ -252,11 +264,19 @@ namespace AIRefactored.AI.Missions.Subsystems
                     _lastStuckFallbackTime = time;
                     _fallbackAttempts++;
 
+                    if (!BotOverlayManager.CanIssueMove(_bot, BotOverlayType.Fallback))
+                        return;
+
                     if (BotNavHelper.TryGetSafeTarget(_bot, out Vector3 candidate) &&
                         NavMesh.SamplePosition(candidate, out var hit, NavSampleRadius, AIRefactoredLayerMasks.NavMeshAll))
                     {
                         Vector3 drifted = BotMovementHelper.ApplyMicroDrift(hit.position, _bot.ProfileId, Time.frameCount, _profile);
+
+                        if (!BotMovementHelper.ShouldMove(_bot, drifted)) // Deduplication after drift.
+                            return;
+
                         BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: 1f);
+                        BotOverlayManager.RegisterMove(_bot, BotOverlayType.Fallback);
                     }
                 }
             }
