@@ -30,8 +30,9 @@ namespace AIRefactored.AI.Core
 
     public sealed class BotComponentCache : IDisposable
     {
-        private static readonly ManualLogSource Logger = Plugin.LoggerInstance;
+        public static readonly BotComponentCache Empty = new BotComponentCache();
 
+        private static readonly ManualLogSource Logger = Plugin.LoggerInstance;
         private static readonly object StaticLock = new object();
         private static readonly HashSet<string> InitializedBots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
