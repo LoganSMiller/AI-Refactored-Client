@@ -32,6 +32,7 @@ namespace AIRefactored.AI.Optimization
 
         private const float StateChangeCooldown = 1.15f; // Prevents overreactive zig-zagging
         private const float SafeMoveMin = 0.08f, SafeMoveMax = 8.6f, MaxNavmeshDeltaY = 1.98f;
+        private const float TeleportGuardRadius = 0.44f; // Absolute anti-teleport distance delta
 
         #endregion
 
@@ -57,7 +58,7 @@ namespace AIRefactored.AI.Optimization
         }
 
         /// <summary>
-        /// Updates and reacts to per-bot state changes. All shifts are human-realistic and strictly error-isolated.
+        /// Updates and reacts to per-bot state changes. All shifts are human-realistic, error-isolated, and never abrupt.
         /// </summary>
         public void UpdateBotOwnerStateIfNeeded(BotOwner botOwner)
         {
@@ -78,7 +79,7 @@ namespace AIRefactored.AI.Optimization
                             (now - lastTime) > StateChangeCooldown + UnityEngine.Random.Range(-0.18f, 0.21f))
                         {
                             _cache[id] = current;
-                            try { ApplyStateChange(botOwner, current); } catch { }
+                            try { ApplyStateChange(botOwner, previous, current); } catch { }
                             _lastShiftTimes[id] = now;
                         }
                     }
@@ -107,7 +108,8 @@ namespace AIRefactored.AI.Optimization
                        bot.Profile != null &&
                        bot.GetPlayer != null &&
                        bot.GetPlayer.IsAI &&
-                       !bot.GetPlayer.IsYourPlayer;
+                       !bot.GetPlayer.IsYourPlayer &&
+                       bot.Transform != null;
             }
             catch
             {
@@ -125,8 +127,8 @@ namespace AIRefactored.AI.Optimization
             try { profile = BotRegistry.Get(botOwner.ProfileId); } catch { }
             try { cache = BotCacheUtility.GetCache(botOwner); } catch { }
 
-            float aggression = 0.5f, caution = 0.5f, composure = 1f;
-            bool isSneaky = false;
+            float aggression = 0.5f, caution = 0.5f, composure = 1f, suppression = 0f;
+            bool isSneaky = false, isPanicked = false;
 
             if (profile != null)
             {
@@ -134,49 +136,63 @@ namespace AIRefactored.AI.Optimization
                 caution = profile.Caution;
                 isSneaky = profile.IsSilentHunter;
             }
-            if (cache != null && cache.PanicHandler != null)
+            if (cache != null)
             {
-                try { composure = cache.PanicHandler.GetComposureLevel(); } catch { }
+                if (cache.PanicHandler != null)
+                {
+                    try { composure = cache.PanicHandler.GetComposureLevel(); } catch { }
+                    try { isPanicked = cache.PanicHandler.IsPanicking; } catch { }
+                }
+                if (cache.Suppression != null)
+                {
+                    try { suppression = cache.Suppression.IsSuppressed() ? 1f : 0f; } catch { }
+                }
             }
-            return new BotStateSnapshot(aggression, caution, composure, isSneaky);
+            return new BotStateSnapshot(aggression, caution, composure, suppression, isSneaky, isPanicked);
         }
 
         /// <summary>
-        /// Applies a staged, micro-randomized, strictly NavMesh-validated behavioral shift (never teleports).
-        /// All moves are queued via main thread, overlay/event/cooldown guarded, and 100% pooled/safe.
+        /// Applies a staged, micro-randomized, strictly NavMesh-validated behavioral shift (never teleports/stutters).
         /// </summary>
-        private void ApplyStateChange(BotOwner botOwner, BotStateSnapshot snapshot)
+        private void ApplyStateChange(BotOwner botOwner, BotStateSnapshot previous, BotStateSnapshot current)
         {
             try
             {
-                bool aggressive = snapshot.Aggression > 0.7f && snapshot.Composure > 0.8f && !snapshot.IsSneaky;
-                bool cautious = snapshot.Caution > 0.6f || snapshot.Composure < 0.35f;
-                bool sneaky = snapshot.IsSneaky;
+                // Expanded logic: take into account composure, panic, suppression, and personality for intent
+                bool aggressive = current.Aggression > 0.68f && current.Composure > 0.7f && !current.IsSneaky && !current.IsPanicked;
+                bool cautious = current.Caution > 0.57f || current.Composure < 0.39f || current.Suppression > 0.1f;
+                bool sneaky = current.IsSneaky;
+                bool panicked = current.IsPanicked;
 
-                float moveDelay = sneaky ? UnityEngine.Random.Range(0.16f, 0.42f) : UnityEngine.Random.Range(0.08f, 0.17f);
-                float moveLength = sneaky ? UnityEngine.Random.Range(2.5f, 4.5f) : UnityEngine.Random.Range(5.5f, 9f);
+                float moveDelay = sneaky ? UnityEngine.Random.Range(0.19f, 0.43f) : UnityEngine.Random.Range(0.07f, 0.15f);
+                float moveLength = sneaky ? UnityEngine.Random.Range(2.7f, 4.6f) : UnityEngine.Random.Range(5.8f, 8.8f);
 
-                if (aggressive)
+                if (panicked)
                 {
-                    TriggerZoneShift(botOwner, true, moveLength, moveDelay);
+                    // Panicked bots stagger/shift erratically, but never teleport. Add micro-random lateral jitter.
+                    TriggerZoneShift(botOwner, null, moveLength * 0.4f, moveDelay * UnityEngine.Random.Range(0.5f, 0.85f), panicked: true);
+                }
+                else if (aggressive)
+                {
+                    TriggerZoneShift(botOwner, true, moveLength, moveDelay, panicked: false);
                 }
                 else if (cautious)
                 {
-                    TriggerZoneShift(botOwner, false, moveLength, moveDelay);
+                    TriggerZoneShift(botOwner, false, moveLength, moveDelay, panicked: false);
                 }
                 else
                 {
-                    TriggerZoneShift(botOwner, null, moveLength * 0.4f, moveDelay * 0.7f);
+                    TriggerZoneShift(botOwner, null, moveLength * 0.37f, moveDelay * 0.72f, panicked: false);
                 }
             }
             catch { }
         }
 
         /// <summary>
-        /// Issues a human-realistic, micro-randomized, strictly NavMesh-validated shift. All failures are pooled, contained, and queued.
+        /// Issues a human-realistic, strictly NavMesh-validated shift. All failures are pooled, contained, and queued.
         /// Never moves or updates state unless every validation passes (never teleports/stutters).
         /// </summary>
-        private static void TriggerZoneShift(BotOwner botOwner, bool? advance, float length, float delay)
+        private static void TriggerZoneShift(BotOwner botOwner, bool? advance, float length, float delay, bool panicked)
         {
             try
             {
@@ -186,17 +202,24 @@ namespace AIRefactored.AI.Optimization
                 Vector3 origin = BotMovementHelper.GetPosition(botOwner);
                 Vector3 shift;
 
-                if (advance == true)
+                if (panicked)
+                {
+                    // Panicked: random lateral shift plus small backward movement (never teleports, always NavMesh)
+                    Vector3 side = botOwner.Transform.right * UnityEngine.Random.Range(-2.5f, 2.5f);
+                    Vector3 back = -botOwner.Transform.forward * UnityEngine.Random.Range(1.0f, 3.2f);
+                    shift = side + back;
+                }
+                else if (advance == true)
                 {
                     shift = botOwner.Transform.forward * length;
                 }
                 else if (advance == false)
                 {
-                    shift = -botOwner.Transform.forward * (length * UnityEngine.Random.Range(0.6f, 0.92f));
+                    shift = -botOwner.Transform.forward * (length * UnityEngine.Random.Range(0.58f, 0.94f));
                 }
                 else
                 {
-                    shift = UnityEngine.Random.insideUnitSphere * (length * 0.25f);
+                    shift = UnityEngine.Random.insideUnitSphere * (length * 0.22f);
                     shift.y = 0f;
                 }
 
@@ -206,16 +229,24 @@ namespace AIRefactored.AI.Optimization
                 else if (sqr < SafeMoveMin * SafeMoveMin)
                     shift = shift.normalized * SafeMoveMin;
 
-                if (shift.sqrMagnitude > 0.02f)
+                if (shift.sqrMagnitude > 0.019f)
                 {
                     Vector3 rawTarget = origin + shift;
 
+                    // Absolute teleport guard: never shift if target would teleport (>TeleportGuardRadius)
+                    if (Vector3.Distance(origin, rawTarget) > SafeMoveMax + TeleportGuardRadius)
+                        return;
+
                     // Robust, pooled NavMesh sampling—no custom TryGetNavMeshSafePosition
                     Vector3 navSafe = rawTarget;
-                    if (!NavMesh.SamplePosition(rawTarget, out NavMeshHit navHit, 1.25f, NavMesh.AllAreas))
+                    if (!NavMesh.SamplePosition(rawTarget, out NavMeshHit navHit, 1.32f, NavMesh.AllAreas))
                         return;
                     navSafe = navHit.position;
                     if (Mathf.Abs(navSafe.y - origin.y) > MaxNavmeshDeltaY)
+                        return;
+
+                    // Never move if the NavMesh sample is blocked or off-map
+                    if ((navSafe - origin).sqrMagnitude < 0.02f)
                         return;
 
                     // Pooled, overlay/event/cooldown safe, never issues direct move if any fail
@@ -224,7 +255,7 @@ namespace AIRefactored.AI.Optimization
                         try
                         {
                             if (BotMovementHelper.ShouldMove(botOwner, navSafe))
-                                BotMovementHelper.SmoothMoveToSafe(botOwner, navSafe, slow: false, cohesion: 1f);
+                                BotMovementHelper.SmoothMoveToSafe(botOwner, navSafe, slow: panicked, cohesion: panicked ? 0.55f : 1f);
                         }
                         catch (Exception ex)
                         {
@@ -248,14 +279,18 @@ namespace AIRefactored.AI.Optimization
             public readonly float Aggression;
             public readonly float Caution;
             public readonly float Composure;
+            public readonly float Suppression;
             public readonly bool IsSneaky;
+            public readonly bool IsPanicked;
 
-            public BotStateSnapshot(float aggression, float caution, float composure, bool isSneaky)
+            public BotStateSnapshot(float aggression, float caution, float composure, float suppression, bool isSneaky, bool isPanicked)
             {
                 Aggression = aggression;
                 Caution = caution;
                 Composure = composure;
+                Suppression = suppression;
                 IsSneaky = isSneaky;
+                IsPanicked = isPanicked;
             }
 
             public override bool Equals(object obj)
@@ -264,11 +299,12 @@ namespace AIRefactored.AI.Optimization
                     return false;
 
                 BotStateSnapshot other = (BotStateSnapshot)obj;
-
-                return Mathf.Abs(Aggression - other.Aggression) < 0.05f &&
-                       Mathf.Abs(Caution - other.Caution) < 0.05f &&
-                       Mathf.Abs(Composure - other.Composure) < 0.05f &&
-                       IsSneaky == other.IsSneaky;
+                return Mathf.Abs(Aggression - other.Aggression) < 0.045f &&
+                       Mathf.Abs(Caution - other.Caution) < 0.045f &&
+                       Mathf.Abs(Composure - other.Composure) < 0.045f &&
+                       Mathf.Abs(Suppression - other.Suppression) < 0.05f &&
+                       IsSneaky == other.IsSneaky &&
+                       IsPanicked == other.IsPanicked;
             }
 
             public override int GetHashCode()
@@ -279,7 +315,9 @@ namespace AIRefactored.AI.Optimization
                     hash = (hash * 31) + Aggression.GetHashCode();
                     hash = (hash * 31) + Caution.GetHashCode();
                     hash = (hash * 31) + Composure.GetHashCode();
+                    hash = (hash * 31) + Suppression.GetHashCode();
                     hash = (hash * 31) + IsSneaky.GetHashCode();
+                    hash = (hash * 31) + IsPanicked.GetHashCode();
                     return hash;
                 }
             }

@@ -84,8 +84,7 @@ namespace AIRefactored.AI.Helpers
             bot.Mover?.GoToPoint(drifted, slow, cohesion);
 
             // [8] Update move cache/timestamp ONLY if real move is issued
-            cache.MoveCache.LastMoveTime = Time.time;
-            cache.MoveCache.LastIssuedTarget = drifted;
+            cache.MoveCache.AuditMove(drifted, Time.time, overlayType.ToString());
         }
 
         /// <summary>
@@ -230,8 +229,7 @@ namespace AIRefactored.AI.Helpers
             var cache = bot?.GetComponent<BotComponentCache>()?.MoveCache;
             if (cache == null) return;
 
-            cache.LastMoveTime = -1000f;
-            cache.LastIssuedTarget = Invalid;
+            cache.Reset();
         }
 
         private static bool IsValid(Vector3 pos)

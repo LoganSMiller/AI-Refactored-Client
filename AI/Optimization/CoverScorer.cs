@@ -7,6 +7,7 @@
 namespace AIRefactored.AI.Optimization
 {
     using System;
+    using AIRefactored.Core;
     using AIRefactored.Pools;
     using AIRefactored.Runtime;
     using BepInEx.Logging;
@@ -22,27 +23,22 @@ namespace AIRefactored.AI.Optimization
     {
         #region Constants
 
-        private const float BackWallDistance = 3.0f;
-        private const float ExposureCheckDistance = 5.0f;
-        private const float EyeHeightOffset = 1.5f;
-        private const float FlankRayDistance = 2.5f;
-        private const float IdealFallbackDistance = 8.0f;
+        private const float BackWallDistance = 3.25f;
+        private const float ExposureCheckDistance = 5.2f;
+        private const float EyeHeightOffset = 1.52f;
+        private const float FlankRayDistance = 2.8f;
+        private const float IdealFallbackDistance = 8.2f;
         private const float MaxScore = 10.0f;
         private const float MinScore = 1.0f;
-        private const float HumanNoise = 0.18f;
+        private const float HumanNoise = 0.19f;
+        private const float GroupPenaltyRadius = 2.2f;
+        private const float VerticalSafeZone = 1.9f;
 
         #endregion
 
         #region Static Fields
 
-        private static readonly Vector3[] FlankAngles =
-        {
-            new Vector3(-60f, 0f, 0f),
-            new Vector3(-30f, 0f, 0f),
-            new Vector3(30f, 0f, 0f),
-            new Vector3(60f, 0f, 0f)
-        };
-
+        private static readonly float[] FlankAngles = { -60f, -30f, 0f, 30f, 60f };
         private static readonly ManualLogSource Logger = Plugin.LoggerInstance;
 
         #endregion
@@ -51,7 +47,7 @@ namespace AIRefactored.AI.Optimization
 
         /// <summary>
         /// Evaluates a fallback point for tactical use.
-        /// Realistic: imperfect risk, micro-bias, edge case handling, and pooled for zero alloc in hot path.
+        /// Realistic: imperfect risk, micro-bias, squad/group, and pooled for zero alloc in hot path.
         /// </summary>
         public static float ScoreCoverPoint(BotOwner bot, Vector3 candidate, Vector3 threatDirection)
         {
@@ -66,40 +62,48 @@ namespace AIRefactored.AI.Optimization
                 Vector3 toThreat = threatDirection.normalized;
                 Vector3 fromThreat = -toThreat;
 
-                hits = TempRaycastHitPool.Rent(5);
+                hits = TempRaycastHitPool.Rent(FlankAngles.Length + 2);
                 score = 1.0f;
 
-                // Back wall bonus: best if solid behind candidate and close to "back"
-                if (Physics.Raycast(eyePos, fromThreat, out hits[0], BackWallDistance))
+                // 1. Back wall bonus: solid behind candidate is best.
+                if (Physics.Raycast(eyePos, fromThreat, out hits[0], BackWallDistance, AIRefactoredLayerMasks.CoverColliderMask))
                 {
                     if (IsSolid(hits[0].collider))
-                        score += 3.0f;
+                        score += 3.1f;
                     else if (IsSemiSolid(hits[0].collider))
-                        score += 1.2f;
+                        score += 1.3f;
                 }
 
-                // Exposure penalty: penalize if there's no obstacle between cover and threat
-                if (!Physics.Raycast(eyePos, toThreat, ExposureCheckDistance))
+                // 2. Exposure penalty: no obstacle between cover and threat is a big minus.
+                if (!Physics.Raycast(eyePos, toThreat, out hits[1], ExposureCheckDistance, AIRefactoredLayerMasks.CoverColliderMask))
                 {
-                    score -= 2.0f;
+                    score -= 2.2f;
                 }
-                else if (!IsSolid(hits[0].collider))
+                else if (!IsSolid(hits[1].collider))
                 {
-                    score -= 0.7f;
+                    score -= 0.8f;
+                }
+                else
+                {
+                    score += 0.3f;
                 }
 
-                // Flank coverage bonuses: encourage flanks with obstacles
+                // 3. Flank coverage: bonus for having cover on sides.
                 for (int i = 0; i < FlankAngles.Length; i++)
                 {
-                    Vector3 flankDir = Quaternion.Euler(0f, FlankAngles[i].x, 0f) * toThreat;
-                    if (Physics.Raycast(eyePos, flankDir.normalized, out hits[i + 1], FlankRayDistance))
+                    Vector3 flankDir = Quaternion.Euler(0f, FlankAngles[i], 0f) * toThreat;
+                    if (Physics.Raycast(eyePos, flankDir.normalized, out hits[i + 2], FlankRayDistance, AIRefactoredLayerMasks.CoverColliderMask))
                     {
-                        if (IsSolid(hits[i + 1].collider))
-                            score += 0.55f;
-                        else if (IsSemiSolid(hits[i + 1].collider))
-                            score += 0.21f;
+                        if (IsSolid(hits[i + 2].collider))
+                            score += 0.53f;
+                        else if (IsSemiSolid(hits[i + 2].collider))
+                            score += 0.18f;
                         else
-                            score -= 0.18f;
+                            score -= 0.15f;
+                    }
+                    else
+                    {
+                        score -= 0.13f;
                     }
                 }
             }
@@ -116,28 +120,48 @@ namespace AIRefactored.AI.Optimization
 
             try
             {
-                // Distance penalty with micro-variance for realism
+                // 4. Distance penalty/bonus: prefer ~IdealFallbackDistance (but no perfect math).
                 if (bot != null)
                 {
                     float dist = Vector3.Distance(bot.Position, candidate);
                     if (dist > IdealFallbackDistance)
                     {
                         float excess = dist - IdealFallbackDistance;
-                        score -= Mathf.Min(excess * 0.23f + UnityEngine.Random.Range(-HumanNoise, HumanNoise), 3.0f);
+                        score -= Mathf.Min(excess * 0.22f + UnityEngine.Random.Range(-HumanNoise, HumanNoise), 2.9f);
                     }
-                    else if (dist < 2.1f)
+                    else if (dist < 2.2f)
                     {
-                        score -= 1.15f; // Too close to bot, not real cover
+                        score -= 1.23f; // Too close: not real fallback
                     }
                 }
 
-                // Tiny judgment error for realness
+                // 5. Vertical safety: penalize too high or low
+                float deltaY = Mathf.Abs(candidate.y - bot.Position.y);
+                if (deltaY > VerticalSafeZone)
+                {
+                    score -= 1.7f;
+                }
+
+                // 6. Group/squad penalty for clustering: avoid fallback to same spot
+                if (bot != null && bot.BotsGroup != null && bot.BotsGroup.MembersCount > 1)
+                {
+                    int overlapCount = 0;
+                    for (int i = 0; i < bot.BotsGroup.MembersCount; i++)
+                    {
+                        var mate = bot.BotsGroup.Member(i);
+                        if (mate == null || mate == bot || mate.IsDead) continue;
+                        float sqr = (mate.Position - candidate).sqrMagnitude;
+                        if (sqr < GroupPenaltyRadius * GroupPenaltyRadius)
+                            overlapCount++;
+                    }
+                    if (overlapCount > 0)
+                        score -= Mathf.Min(0.65f * overlapCount, 2.2f);
+                }
+
+                // 7. Human-like micro error (never perfect).
                 score += UnityEngine.Random.Range(-HumanNoise, HumanNoise);
             }
-            catch
-            {
-                // No-op penalty error.
-            }
+            catch { }
 
             return Mathf.Clamp(score, MinScore, MaxScore);
         }
@@ -147,7 +171,7 @@ namespace AIRefactored.AI.Optimization
         #region Internal API
 
         /// <summary>
-        /// True if collider is solid, safe cover (not glass, foliage, small triggers, banners, etc).
+        /// True if collider is solid, safe cover (not glass, foliage, triggers, banners, etc).
         /// </summary>
         internal static bool IsSolid(Collider collider)
         {
@@ -156,7 +180,7 @@ namespace AIRefactored.AI.Optimization
                 if (collider == null || collider.isTrigger)
                     return false;
 
-                if (collider.bounds.size.magnitude < 0.2f)
+                if (collider.bounds.size.magnitude < 0.18f)
                     return false;
 
                 string tag = collider.tag != null ? collider.tag.ToLowerInvariant() : string.Empty;
@@ -164,11 +188,10 @@ namespace AIRefactored.AI.Optimization
 
                 if (tag.Contains("glass") || tag.Contains("foliage") || tag.Contains("banner") || tag.Contains("transparent"))
                     return false;
-
                 if (mat.Contains("leaf") || mat.Contains("bush") || mat.Contains("net") ||
-                    mat.Contains("fabric") || mat.Contains("cloth") || mat.Contains("tarp"))
+                    mat.Contains("fabric") || mat.Contains("cloth") || mat.Contains("tarp") ||
+                    mat.Contains("carpet") || mat.Contains("cushion") || mat.Contains("plastic"))
                     return false;
-
                 return true;
             }
             catch
@@ -188,15 +211,15 @@ namespace AIRefactored.AI.Optimization
                     return false;
 
                 float mag = collider.bounds.size.magnitude;
-                if (mag >= 0.14f && mag < 0.5f)
+                if (mag >= 0.13f && mag < 0.54f)
                     return true;
 
                 string tag = collider.tag != null ? collider.tag.ToLowerInvariant() : string.Empty;
-                if (tag.Contains("crate") || tag.Contains("sign") || tag.Contains("prop"))
+                if (tag.Contains("crate") || tag.Contains("sign") || tag.Contains("prop") || tag.Contains("shelf"))
                     return true;
 
                 string mat = collider.sharedMaterial != null ? collider.sharedMaterial.name.ToLowerInvariant() : string.Empty;
-                if (mat.Contains("wood") || mat.Contains("metal"))
+                if (mat.Contains("wood") || mat.Contains("metal") || mat.Contains("chipboard") || mat.Contains("thin"))
                     return true;
 
                 return false;

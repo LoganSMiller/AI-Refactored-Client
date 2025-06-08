@@ -93,7 +93,24 @@ namespace AIRefactored.AI.Core
         }
 
         /// <summary>
-        /// Tries to get an existing cache for a BotOwner.
+        /// Returns the cache for a given bot, or null if missing. Never creates. Canonical arbitration lookup.
+        /// </summary>
+        public static BotComponentCache Get(BotOwner bot)
+        {
+            if (!IsFullyValidBot(bot))
+                return null;
+
+            string id = bot.Profile.Id;
+            lock (Lock)
+            {
+                if (CacheMap.TryGetValue(id, out var existing))
+                    return existing;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Tries to get an existing cache for a BotOwner. Legacy/compat.
         /// </summary>
         public static BotComponentCache TryGetExisting(BotOwner bot)
         {

@@ -8,6 +8,7 @@ namespace AIRefactored.AI.Medical
 {
     using System;
     using AIRefactored.AI.Core;
+    using AIRefactored.AI.Threads;
     using AIRefactored.Core;
     using BepInEx.Logging;
     using EFT;
@@ -40,7 +41,7 @@ namespace AIRefactored.AI.Medical
         private float _lastArbTime;
         private bool _hasInjury;
         private bool _hasBlackLimb;
-        private bool _isActive = true;
+        private bool _isActive;
 
         #endregion
 
@@ -107,20 +108,21 @@ namespace AIRefactored.AI.Medical
             _lastArbTime = -1f;
             _hasInjury = false;
             _hasBlackLimb = false;
+            _isActive = true;
         }
 
         /// <summary>
         /// Returns true if the bot should attempt a healing overlay intent now.
         /// Arbitration/event overlay guarded.
         /// </summary>
-        public bool ShouldHeal(float time)
+        public bool ShouldHeal(float now)
         {
             if (!_isActive)
                 return false;
 
             try
             {
-                if (!_hasInjury || !_hasBlackLimb || time < _nextHealTime)
+                if (!_hasInjury || !_hasBlackLimb || now < _nextHealTime)
                     return false;
 
                 // Never heal if panicking or in combat (Ultra-Platinum++ recovery layer)
@@ -130,7 +132,7 @@ namespace AIRefactored.AI.Medical
                     return false;
 
                 // Never heal if squad fallback/retreat is active (extra movement safety layer)
-                if (_cache.GroupBehavior != null && _cache.GroupBehavior.IsInSquad && _cache.Combat != null && _cache.Combat.LastStateChangeTime + 1.2f > time)
+                if (_cache.GroupBehavior != null && _cache.GroupBehavior.IsInSquad && _cache.Combat != null && _cache.Combat.LastStateChangeTime + 1.2f > now)
                     return false;
 
                 // Overlay arbitration: Only allow healing if medical overlay intent is granted
@@ -138,7 +140,7 @@ namespace AIRefactored.AI.Medical
                     return false;
 
                 // Only one arbitration per window
-                if (time - _lastArbTime < ArbitrationWindow)
+                if (now - _lastArbTime < ArbitrationWindow)
                     return false;
 
                 return true;
@@ -155,30 +157,49 @@ namespace AIRefactored.AI.Medical
         /// Main overlay/event handler for bot healing. Attempts to overlay a single medical intent.
         /// Call from BotBrain/event system only—never tick/coroutine spam.
         /// </summary>
-        public void OverlayHealIfReady(float time)
+        public void OverlayHealIfReady(float now)
         {
             if (!_isActive)
                 return;
 
             try
             {
-                if (!ShouldHeal(time))
+                if (!ShouldHeal(now))
                     return;
 
                 // Register arbitration/overlay for this healing event (one overlay per event)
                 BotOverlayManager.RegisterMove(_cache.Bot, BotOverlayType.Medical);
-                _lastArbTime = time;
+                _lastArbTime = now;
 
                 // Humanize anticipation window: small randomized wait before actually starting healing (simulate hesitation/scan)
                 float anticipation = UnityEngine.Random.Range(0.12f, 0.39f);
-                // (In BotBrain or event caller, queue or delay TryUseMedicine() by anticipation time.)
-
-                TryUseMedicine();
+                BotBrain.ScheduleAfter(_cache.Bot, anticipation, () =>
+                {
+                    TryUseMedicine();
+                });
             }
             catch (Exception ex)
             {
                 _isActive = false;
                 Logger.LogError($"[BotInjurySystem] OverlayHealIfReady() failed: {ex}. Disabling injury logic for this bot.");
+            }
+        }
+
+        /// <summary>
+        /// Tick method called from BotBrain, to update injury system logic.
+        /// </summary>
+        public void Tick(float deltaTime, float now)
+        {
+            if (!_isActive) return;
+
+            try
+            {
+                OverlayHealIfReady(now);
+            }
+            catch (Exception ex)
+            {
+                _isActive = false;
+                Logger.LogError($"[BotInjurySystem] Tick() failed: {ex}. Disabling injury logic for this bot.");
             }
         }
 

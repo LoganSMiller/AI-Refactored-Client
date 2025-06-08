@@ -30,6 +30,7 @@ namespace AIRefactored.AI.Memory
         private const float GridSnapSize = 0.5f;
         private const float MaxMemoryTime = 14f;
         private const float PositionToleranceSqr = 0.25f;
+        private const float AnticipationEventWindow = 1.35f;
 
         #endregion
 
@@ -43,6 +44,7 @@ namespace AIRefactored.AI.Memory
 
         private BotComponentCache _cache;
         private bool _extractionStarted;
+        private float _lastAnticipationEvent = -99f;
 
         #endregion
 
@@ -132,6 +134,7 @@ namespace AIRefactored.AI.Memory
                 _enemyMemoryById.Clear();
                 _clearedSpots.Clear();
                 _extractionStarted = false;
+                _lastAnticipationEvent = -99f;
             }
             catch (Exception ex)
             {
@@ -168,10 +171,12 @@ namespace AIRefactored.AI.Memory
                     if ((gridPos - _enemyMemoryList[i].Position).sqrMagnitude < PositionToleranceSqr)
                     {
                         _enemyMemoryList[i] = new SeenEnemyRecord(gridPos, now, finalTag);
+                        _lastAnticipationEvent = now; // recent change, fakeout window
                         return;
                     }
                 }
                 _enemyMemoryList.Add(new SeenEnemyRecord(gridPos, now, finalTag));
+                _lastAnticipationEvent = now;
             }
             catch (Exception ex)
             {
@@ -354,6 +359,15 @@ namespace AIRefactored.AI.Memory
         {
             try { return _extractionStarted; }
             catch (Exception ex) { Logger.LogError($"[BotTacticalMemory] IsExtracting failed: {ex}"); return false; }
+        }
+
+        /// <summary>
+        /// Returns true if a recent enemy position/anticipation/fakeout event has occurred (for overlay arbitration).
+        /// </summary>
+        public bool HasRecentAnticipationEvent()
+        {
+            try { return (Time.time - _lastAnticipationEvent) < AnticipationEventWindow; }
+            catch (Exception ex) { Logger.LogError($"[BotTacticalMemory] HasRecentAnticipationEvent failed: {ex}"); return false; }
         }
 
         #endregion

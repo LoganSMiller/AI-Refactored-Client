@@ -35,6 +35,7 @@ namespace AIRefactored.AI.Looting
         private const float MinPersonalCooldown = 0.33f;
         private const float MoveToCorpseRadius = 1.4f;
         private const float MoveToCorpseCohesion = 0.73f;
+        private const int MaxSquadLooters = 1; // Only 1 squadmate loots a corpse at a time.
 
         #endregion
 
@@ -42,6 +43,7 @@ namespace AIRefactored.AI.Looting
 
         private static readonly Dictionary<string, float> LootTimestamps = new Dictionary<string, float>(32);
         private static readonly HashSet<string> RecentlyLooted = new HashSet<string>();
+        private static readonly Dictionary<string, string> SquadCorpseLocks = new Dictionary<string, string>(8); // groupId→profileId
 
         #endregion
 
@@ -118,6 +120,7 @@ namespace AIRefactored.AI.Looting
         {
             LootTimestamps.Clear();
             RecentlyLooted.Clear();
+            SquadCorpseLocks.Clear();
         }
 
         /// <summary>
@@ -172,16 +175,25 @@ namespace AIRefactored.AI.Looting
         #region Core Logic
 
         /// <summary>
-        /// Ready for overlay looting—bot is alive, not panicking, valid, and can act.
+        /// Ready for overlay looting—bot is alive, not panicking, valid, can act, and not blocked by squad logic.
         /// </summary>
         private bool IsReady()
         {
-            return _bot != null
-                && !_bot.IsDead
-                && EFTPlayerUtil.IsValid(_bot.GetPlayer)
-                && _cache != null
-                && _cache.PanicHandler != null
-                && !_cache.PanicHandler.IsPanicking;
+            if (_bot == null || _bot.IsDead || !EFTPlayerUtil.IsValid(_bot.GetPlayer) || _cache == null)
+                return false;
+            if (_cache.PanicHandler != null && _cache.PanicHandler.IsPanicking)
+                return false;
+            // Squad lock: only one squadmate loots a corpse at a time
+            if (_bot.BotsGroup != null && _bot.BotsGroup.MembersCount > 1)
+            {
+                string groupId = _bot.Profile?.Info?.GroupId ?? string.Empty;
+                if (!string.IsNullOrEmpty(groupId) && SquadCorpseLocks.TryGetValue(groupId, out string locked))
+                {
+                    if (!string.IsNullOrEmpty(locked) && locked != _bot.ProfileId)
+                        return false;
+                }
+            }
+            return true;
         }
 
         /// <summary>
@@ -214,6 +226,14 @@ namespace AIRefactored.AI.Looting
                 if (string.IsNullOrEmpty(profileId))
                     return;
 
+                // Squad lock
+                if (_bot.BotsGroup != null && _bot.BotsGroup.MembersCount > 1)
+                {
+                    string groupId = _bot.Profile?.Info?.GroupId ?? string.Empty;
+                    if (!string.IsNullOrEmpty(groupId))
+                        SquadCorpseLocks[groupId] = profileId;
+                }
+
                 // Only move if not already close enough (strict anti-spam, anti-teleport).
                 Vector3 corpsePos = corpse.Transform.position;
                 float dist = Vector3.Distance(_bot.Position, corpsePos);
@@ -231,6 +251,14 @@ namespace AIRefactored.AI.Looting
                 // Now in range—loot attempt
                 LootCorpse(corpse);
                 RememberLooted(profileId);
+
+                // Release squad lock
+                if (_bot.BotsGroup != null && _bot.BotsGroup.MembersCount > 1)
+                {
+                    string groupId = _bot.Profile?.Info?.GroupId ?? string.Empty;
+                    if (!string.IsNullOrEmpty(groupId) && SquadCorpseLocks.TryGetValue(groupId, out string locked) && locked == profileId)
+                        SquadCorpseLocks[groupId] = null;
+                }
             }
             catch (Exception ex)
             {
@@ -239,7 +267,7 @@ namespace AIRefactored.AI.Looting
         }
 
         /// <summary>
-        /// Finds the best valid lootable corpse within range/angle/LOS (pooled, error-guarded).
+        /// Finds the best valid lootable corpse within range/angle/LOS (pooled, error-guarded, squad-safe).
         /// </summary>
         private Player FindLootableCorpse()
         {
@@ -278,6 +306,14 @@ namespace AIRefactored.AI.Looting
                     if (!HasLineOfSight(origin, toCorpse, distance, candidate))
                         continue;
 
+                    // Squad lock: if another squadmate is already looting this, skip
+                    if (_bot.BotsGroup != null && _bot.BotsGroup.MembersCount > 1)
+                    {
+                        string groupId = _bot.Profile?.Info?.GroupId ?? string.Empty;
+                        if (!string.IsNullOrEmpty(groupId) && SquadCorpseLocks.TryGetValue(groupId, out string locked) && locked != _bot.ProfileId)
+                            continue;
+                    }
+
                     if (distance < bestDist)
                     {
                         best = candidate;
@@ -295,16 +331,30 @@ namespace AIRefactored.AI.Looting
         }
 
         /// <summary>
-        /// All corpse validation: not self, dead, valid, not looted recently.
+        /// All corpse validation: not self, dead, valid, not looted recently, and not locked to other squadmate.
         /// </summary>
         private bool IsValidCorpse(Player player)
         {
-            return EFTPlayerUtil.IsValid(player)
-                && player.HealthController != null
-                && !player.HealthController.IsAlive
-                && player != _bot.GetPlayer
-                && !string.IsNullOrEmpty(player.ProfileId)
-                && !WasLootedRecently(player.ProfileId);
+            if (!EFTPlayerUtil.IsValid(player)
+                || player.HealthController == null
+                || player.HealthController.IsAlive
+                || player == _bot.GetPlayer
+                || string.IsNullOrEmpty(player.ProfileId)
+                || WasLootedRecently(player.ProfileId))
+                return false;
+
+            // Only one squadmate can loot a corpse at a time.
+            if (_bot.BotsGroup != null && _bot.BotsGroup.MembersCount > 1)
+            {
+                string groupId = _bot.Profile?.Info?.GroupId ?? string.Empty;
+                if (!string.IsNullOrEmpty(groupId) && SquadCorpseLocks.TryGetValue(groupId, out string locked))
+                {
+                    if (!string.IsNullOrEmpty(locked) && locked != _bot.ProfileId && player.ProfileId == locked)
+                        return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>

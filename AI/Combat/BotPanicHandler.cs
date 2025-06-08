@@ -40,6 +40,7 @@ namespace AIRefactored.AI.Combat
         private const float OverlayMoveDedupSqr = 0.0001f;
         private const float OverlayMoveCooldown = 0.56f;
         private const BotOverlayType OverlayType = BotOverlayType.Panic;
+        private const float AnticipationLockWindow = 1.25f;
 
         #endregion
 
@@ -56,6 +57,7 @@ namespace AIRefactored.AI.Combat
         private bool _panicStutterActive;
         private Vector3 _lastOverlayMoveIssued = Vector3.zero;
         private float _lastOverlayMoveTime = -10f;
+        private float _anticipationLockUntil = -1f;
 
         #endregion
 
@@ -63,6 +65,22 @@ namespace AIRefactored.AI.Combat
 
         public bool IsPanicking => _isPanicking;
         public float GetComposureLevel() => _composureLevel;
+
+        /// <summary>
+        /// Returns true if the bot is anticipation-locked due to recent panic/fakeout/arbitration state.
+        /// Used by overlay/fakeout/anticipation logic for arbitration.
+        /// </summary>
+        public bool IsAnticipationLocked
+        {
+            get
+            {
+                if (_isPanicking)
+                    return true;
+                if (_anticipationLockUntil > Time.time)
+                    return true;
+                return false;
+            }
+        }
 
         #endregion
 
@@ -282,6 +300,7 @@ namespace AIRefactored.AI.Combat
                     _composureLevel = 0f;
                     _lastOverlayMoveIssued = fallback;
                     _lastOverlayMoveTime = now;
+                    _anticipationLockUntil = now + AnticipationLockWindow;
 
                     _cache.Escalation?.NotifyPanicTriggered();
 
@@ -332,6 +351,7 @@ namespace AIRefactored.AI.Combat
             {
                 _isPanicking = false;
                 _lastPanicExitTime = now;
+                _anticipationLockUntil = now + AnticipationLockWindow;
                 if (_bot.BotsGroup != null)
                 {
                     for (int i = 0; i < _bot.BotsGroup.MembersCount; i++)

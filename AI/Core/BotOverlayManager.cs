@@ -107,6 +107,20 @@ namespace AIRefactored.AI.Core
             _overlayStates.Clear();
         }
 
+        /// <summary>
+        /// Returns true if the specified overlay type is active for this bot (arbitration/lock check).
+        /// </summary>
+        public static bool HasActiveOverlay(BotOwner bot, BotOverlayType overlayType)
+        {
+            if (bot == null) return false;
+            OverlayActiveState state;
+            if (_overlayStates.TryGetValue(bot, out state) && state != null && state.IsActive)
+            {
+                return state.HolderType == overlayType;
+            }
+            return false;
+        }
+
         #endregion
 
         #region OverlayActiveState Pool

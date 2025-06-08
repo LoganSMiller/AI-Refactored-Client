@@ -35,6 +35,7 @@ namespace AIRefactored.AI.Navigation
         private const float StealthExtraWait = 0.23f;
         private const float RareGiveUpChance = 0.04f;
         private const float MaxStaleDoorTime = 5.0f;
+        private const float ClusteredSquadDelay = 0.27f; // extra delay for crowd at doors
 
         #endregion
 
@@ -49,6 +50,7 @@ namespace AIRefactored.AI.Navigation
         private float _hesitateUntil;
         private float _giveUpUntil;
         private bool _hasGivenUp;
+        private int _squadCrowdCount;
 
         #endregion
 
@@ -94,7 +96,7 @@ namespace AIRefactored.AI.Navigation
                     return;
                 _lastDoorCheckTime = time;
 
-                // Give-up period (overlay-only, never disables)
+                // Overlay give-up period: never disables, just overlays "not now"
                 if (_hasGivenUp && time < _giveUpUntil)
                 {
                     MarkBlocked(_currentDoor, time);
@@ -103,6 +105,7 @@ namespace AIRefactored.AI.Navigation
                 if (_hasGivenUp && time >= _giveUpUntil)
                     ClearGiveUp();
 
+                // If current door is stale, clear it
                 if (_currentDoor != null && time - _doorStateSinceTime > MaxStaleDoorTime)
                     ClearDoorState();
 
@@ -135,8 +138,12 @@ namespace AIRefactored.AI.Navigation
                     return;
                 }
 
-                if (state == EDoorState.Interacting || time < _nextRetryTime || ShouldWaitForSquad(door))
+                // Door in interaction or bot is waiting for retry or for squad
+                if (state == EDoorState.Interacting || time < _nextRetryTime || ShouldWaitForSquad(door, out _squadCrowdCount))
                 {
+                    // If clustered, overlay a bit more anticipation delay
+                    if (_squadCrowdCount > 2 && _hesitateUntil < time)
+                        _hesitateUntil = time + ClusteredSquadDelay;
                     MarkBlocked(door, time);
                     return;
                 }
@@ -150,6 +157,8 @@ namespace AIRefactored.AI.Navigation
                     hesitation = PanicFastDelay;
                 else if (profile != null && (profile.Personality == PersonalityType.Stalker || profile.Caution > 0.7f))
                     hesitation = UnityEngine.Random.Range(HesitateMinDelay, HesitateMaxDelay) + StealthExtraWait;
+                else if (_squadCrowdCount > 2)
+                    hesitation = ClusteredSquadDelay;
                 else if (UnityEngine.Random.value < HesitateChance)
                     hesitation = UnityEngine.Random.Range(HesitateMinDelay, HesitateMaxDelay);
 
@@ -161,6 +170,7 @@ namespace AIRefactored.AI.Navigation
                     return;
                 }
 
+                // Humanized rare give up overlay (never disables/pauses for long)
                 if (UnityEngine.Random.value < RareGiveUpChance)
                 {
                     _hasGivenUp = true;
@@ -169,6 +179,7 @@ namespace AIRefactored.AI.Navigation
                     return;
                 }
 
+                // Do not interact if crouched/prone
                 float pose = _bot.GetPlayer?.MovementContext?.PoseLevel ?? 100f;
                 if (pose < 40f)
                 {
@@ -176,11 +187,15 @@ namespace AIRefactored.AI.Navigation
                     return;
                 }
 
-                // Overlay-only: Issue door interaction intent. Never disables/blocks or halts real movement.
+                // Overlay-only: Issue door interaction intent. Never disables/blocks/halt.
                 try
                 {
                     EInteractionType interactionType = GetBestInteractionType(state);
                     player.CurrentManagedState.StartDoorInteraction(door, new InteractionResult(interactionType), null);
+
+                    // Overlay-only: Optionally squad comms/voice overlays for realism (not movement-affecting)
+                    if (cache?.GroupComms != null && _squadCrowdCount > 2 && UnityEngine.Random.value < 0.13f)
+                        cache.GroupComms.Say(EPhraseTrigger.FollowMe);
                 }
                 catch (Exception ex)
                 {
@@ -192,8 +207,9 @@ namespace AIRefactored.AI.Navigation
                 _doorStateSinceTime = time;
                 IsBlockedByDoor = true;
             }
-            catch
+            catch (Exception ex)
             {
+                _log.LogError("[BotDoorInteraction] Tick Exception: " + ex);
                 ClearDoorState();
             }
         }
@@ -226,6 +242,7 @@ namespace AIRefactored.AI.Navigation
             _giveUpUntil = 0f;
             _hasGivenUp = false;
             _doorStateSinceTime = 0f;
+            _squadCrowdCount = 0;
         }
 
         #endregion
@@ -238,6 +255,7 @@ namespace AIRefactored.AI.Navigation
             IsBlockedByDoor = false;
             _hesitateUntil = 0f;
             _doorStateSinceTime = 0f;
+            _squadCrowdCount = 0;
         }
 
         private void ClearGiveUp()
@@ -255,8 +273,13 @@ namespace AIRefactored.AI.Navigation
             _doorStateSinceTime = now;
         }
 
-        private bool ShouldWaitForSquad(Door door)
+        /// <summary>
+        /// Returns true if the bot should hesitate for squadmates at the door.
+        /// Outputs crowd count for overlay logic.
+        /// </summary>
+        private bool ShouldWaitForSquad(Door door, out int crowdCount)
         {
+            crowdCount = 0;
             try
             {
                 if (_bot?.BotsGroup == null || _bot.BotsGroup.MembersCount <= 1)
@@ -269,12 +292,12 @@ namespace AIRefactored.AI.Navigation
                         continue;
                     if (Vector3.Distance(door.transform.position, mate.Position) < SquadWaitRadius)
                         nearby++;
-                    if (nearby > 2)
-                        return true;
                 }
-                return false;
+                crowdCount = nearby;
+                // If more than 2 bots crowding the door, wait for better flow
+                return nearby > 2;
             }
-            catch { return false; }
+            catch { crowdCount = 0; return false; }
         }
 
         private static EInteractionType GetBestInteractionType(EDoorState state)

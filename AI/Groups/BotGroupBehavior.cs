@@ -216,8 +216,7 @@ namespace AIRefactored.AI.Groups
 
             // Final overlay move, arbitration-guarded (NEVER call Mover/GoToPoint/transform directly)
             BotMovementHelper.SmoothMoveToSafe(_bot, drifted, false, 1f);
-            _moveCache.LastMoveTime = now;
-            _moveCache.LastIssuedTarget = drifted;
+            _moveCache.AuditMove(drifted, now, "SmoothMoveToSafe");
             _lastMoveTime = now;
             _lastMoveTarget = drifted;
 
