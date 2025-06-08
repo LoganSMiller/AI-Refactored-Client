@@ -93,8 +93,13 @@ namespace AIRefactored.AI.Movement
         /// </summary>
         public void Initialize(BotComponentCache cache)
         {
-            _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-            _bot = cache.Bot ?? throw new ArgumentException("[BotMovementController] Bot missing.");
+            if (cache == null)
+                throw new ArgumentNullException(nameof(cache));
+            if (cache.Bot == null)
+                throw new ArgumentException("[BotMovementController] Bot missing.");
+
+            _cache = cache;
+            _bot = cache.Bot;
             _moveCache = _cache.MoveCache ?? new BotMoveCache();
             _personality = cache.PersonalityProfile ?? BotPersonalityProfile.Default;
 
@@ -398,7 +403,12 @@ namespace AIRefactored.AI.Movement
                 _inAntiStuckRecovery = true;
                 _antiStuckRecoverUntil = now + AntiStuckRecoverTime + UnityEngine.Random.Range(0.5f, 1.1f);
                 TryVoiceOverlay("stuck");
-                Logger.LogWarning("[BotMovementController] Bot stuck detected, entering anti-stuck overlay: " + _bot.ProfileId);
+                // Limit logging to once every 10 seconds to prevent spam
+                if (now - _lastErrorLogTime > 10f)
+                {
+                    Logger.LogWarning("[BotMovementController] Bot stuck detected, entering anti-stuck overlay: " + _bot.ProfileId);
+                    _lastErrorLogTime = now;
+                }
             }
             else if (_inAntiStuckRecovery && now > _antiStuckRecoverUntil)
             {

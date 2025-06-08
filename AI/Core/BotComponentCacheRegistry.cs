@@ -54,29 +54,58 @@ namespace AIRefactored.AI.Core
                 if (CacheMap.TryGetValue(id, out var existing))
                 {
                     if (!PlayerMap.ContainsKey(player))
+                    {
                         PlayerMap[player] = existing;
+                        Logger.LogDebug($"[BotComponentCacheRegistry] Added player mapping for bot: {id}");
+                    }
 
-                    // Attach owner if missing (guaranteed ready, no race)
+                    // Attach owner if missing and not yet initialized, ensure no overwrites
                     if (existing.AIRefactoredBotOwner == null)
                     {
-                        var attachOwner = bot.GetComponent<AIRefactoredBotOwner>() ?? new AIRefactoredBotOwner();
+                        var attachOwner = bot.GetComponent<AIRefactoredBotOwner>();
+                        if (attachOwner == null)
+                        {
+                            attachOwner = new AIRefactoredBotOwner();
+                            Logger.LogDebug($"[BotComponentCacheRegistry] Created new AIRefactoredBotOwner for bot: {id}");
+                        }
+
                         existing.SetOwner(attachOwner);
+
                         if (!attachOwner.IsInitialized)
-                            attachOwner.Initialize(bot);
+                        {
+                            try
+                            {
+                                attachOwner.Initialize(bot);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogError($"[BotComponentCacheRegistry] Failed to initialize AIRefactoredBotOwner for bot {id}: {ex}");
+                                return null;
+                            }
+                        }
                     }
                     return existing;
                 }
 
+                // Create new cache + owner and initialize safely
                 try
                 {
                     var newCache = new BotComponentCache();
                     newCache.Initialize(bot);
 
-                    var owner = bot.GetComponent<AIRefactoredBotOwner>() ?? new AIRefactoredBotOwner();
+                    var owner = bot.GetComponent<AIRefactoredBotOwner>();
+                    if (owner == null)
+                    {
+                        owner = new AIRefactoredBotOwner();
+                        Logger.LogDebug($"[BotComponentCacheRegistry] Created new AIRefactoredBotOwner for bot: {id}");
+                    }
+
                     newCache.SetOwner(owner);
 
                     if (!owner.IsInitialized)
+                    {
                         owner.Initialize(bot);
+                    }
 
                     CacheMap[id] = newCache;
                     PlayerMap[player] = newCache;

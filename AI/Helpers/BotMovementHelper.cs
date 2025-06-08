@@ -37,10 +37,6 @@ namespace AIRefactored.AI.Helpers
 
         #region Main Movement (Overlay/Event/Intent Only)
 
-        /// <summary>
-        /// Canonical, triple-guarded overlay/event move. All overlays must use this with arbitration and timestamp.
-        /// Never called per-tick/coroutine—ONE intent per overlay/event per arbitration window.
-        /// </summary>
         public static void SmoothMoveToSafe(
             BotOwner bot,
             Vector3 destination,
@@ -49,60 +45,46 @@ namespace AIRefactored.AI.Helpers
             BotOverlayType overlayType = BotOverlayType.Patrol)
         {
             if (!IsAlive(bot)) return;
-            var cache = bot?.GetComponent<BotComponentCache>();
+            var cache = bot.GetComponent<BotComponentCache>();
             if (cache == null || cache.MoveCache == null) return;
 
-            // [1] Arbitration: Only allow if overlay manager grants move
             if (!BotOverlayManager.CanIssueMove(bot, overlayType))
                 return;
-
-            // [2] Intent gating: No anticipation, fakeout, or event lockout
             if (cache.MoveCache.AnticipationActive || cache.MoveCache.EventLockoutActive)
                 return;
             if (IsMovementPaused(bot) || IsInInteractionState(bot))
                 return;
 
-            // [3] NavMesh validation and Y clamp
             if (!NavMesh.SamplePosition(destination, out var hit, NavMeshSampleRadius, NavMesh.AllAreas))
                 return;
+
             Vector3 safe = hit.position;
             float baseY = GetPosition(bot).y;
             if (Mathf.Abs(safe.y - baseY) > YClampMax)
                 safe.y = baseY;
             if (!IsValid(safe)) return;
 
-            // [4] Micro-drift/squad/formation only AFTER NavMesh validation
             Vector3 drifted = ApplyMicroDrift(safe, bot.ProfileId, Time.frameCount, cache.PersonalityProfile);
 
-            // [5] Deduplication: Only issue move if final (drifted, validated) target is new
             if (!ShouldMove(bot, drifted)) return;
 
-            // [6] Arbitration lock: Register move (overlayType-aware, cooldown managed internally)
             BotOverlayManager.RegisterMove(bot, overlayType);
-
-            // [7] INTENT ONLY: Never set position/teleport, never tick. Only one GoToPoint per overlay/event.
             bot.Mover?.GoToPoint(drifted, slow, cohesion);
-
-            // [8] Update move cache/timestamp ONLY if real move is issued
             cache.MoveCache.AuditMove(drifted, Time.time, overlayType.ToString());
         }
 
-        /// <summary>
-        /// Checks all dedup/cooldown after NavMesh and drift. No allocation, zero hot-path cost.
-        /// </summary>
         public static bool ShouldMove(BotOwner bot, Vector3 destination)
         {
-            var cache = bot?.GetComponent<BotComponentCache>();
-            var moveCache = cache?.MoveCache;
-            if (moveCache == null) return false;
+            var cache = bot?.GetComponent<BotComponentCache>()?.MoveCache;
+            if (cache == null) return false;
 
             Vector3 current = GetPosition(bot);
             float sqrDist = (current - destination).sqrMagnitude;
             if (sqrDist < MinMoveDistance * MinMoveDistance)
                 return false;
-            if (Time.time - moveCache.LastMoveTime < MoveCooldown)
+            if (Time.time - cache.LastMoveTime < MoveCooldown)
                 return false;
-            if (!moveCache.IsNewTarget(destination, MinMoveDistance * MinMoveDistance))
+            if (!cache.IsNewTarget(destination, MinMoveDistance * MinMoveDistance))
                 return false;
             return true;
         }
@@ -111,10 +93,6 @@ namespace AIRefactored.AI.Helpers
 
         #region Overlay/Event Retreat (Squad-Safe)
 
-        /// <summary>
-        /// Generates a pooled, squad-safe retreat path overlay (anti-overlap, angle-spread) for squad fallback overlays.
-        /// All positions are NavMesh/Y-clamped and multiplayer/headless safe.
-        /// </summary>
         public static List<Vector3> GetSquadSafeRetreatPath(BotOwner bot, Vector3 threatDir, float squadSpacing)
         {
             var result = TempListPool.Rent<Vector3>();
@@ -148,6 +126,7 @@ namespace AIRefactored.AI.Helpers
                 result.Add(origin);
                 return result;
             }
+
             Vector3 safe = navHit.position;
             if (Mathf.Abs(safe.y - origin.y) > YClampMax)
                 safe.y = origin.y;
@@ -161,9 +140,6 @@ namespace AIRefactored.AI.Helpers
 
         #region Look / Aim Overlay (Smooth, One-Shot, No Snap)
 
-        /// <summary>
-        /// Smoothly rotates the bot to look at a target. Only called as an overlay/event (never per-tick).
-        /// </summary>
         public static void SmoothLookTo(BotOwner bot, Vector3 target, float speed = LookSmoothSpeed)
         {
             if (!IsAlive(bot) || bot.Transform == null) return;
@@ -228,7 +204,6 @@ namespace AIRefactored.AI.Helpers
         {
             var cache = bot?.GetComponent<BotComponentCache>()?.MoveCache;
             if (cache == null) return;
-
             cache.Reset();
         }
 
@@ -267,9 +242,6 @@ namespace AIRefactored.AI.Helpers
                    state == EPlayerState.Approach;
         }
 
-        /// <summary>
-        /// Fallback overlay move (exit/retreat)—uses arbitration, timestamp, and triple-guard as above.
-        /// </summary>
         public static void SmoothMoveToSafeExit(BotOwner bot, Vector3 destination, bool slow = true, float cohesion = 1f)
         {
             SmoothMoveToSafe(bot, destination, slow, cohesion, BotOverlayType.Fallback);
