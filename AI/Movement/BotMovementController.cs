@@ -461,6 +461,25 @@ namespace AIRefactored.AI.Movement
 
         #endregion
 
+        #region Anti-Stuck State Accessor (Overlay Arbitration Safe)
+
+        /// <summary>
+        /// Returns true if bot is currently in anti-stuck overlay recovery, or hasn't moved in anti-stuck interval.
+        /// This API is used for overlay/event arbitration—never exposes internals, always zero-alloc.
+        /// </summary>
+        public bool IsInAntiStuckState(float interval = AntiStuckCheckInterval, float distSqr = AntiStuckDistSqr)
+        {
+            float now = Time.time;
+            if (_inAntiStuckRecovery || now < _antiStuckRecoverUntil)
+                return true;
+            Vector3 currentPos = _bot?.Position ?? Vector3.zero;
+            if ((currentPos - _lastKnownBotPos).sqrMagnitude < distSqr && (now - _lastBotMoveTime) > interval)
+                return true;
+            return false;
+        }
+
+        #endregion
+
         #region Real Move/Event API
 
         /// <summary>
@@ -491,3 +510,4 @@ namespace AIRefactored.AI.Movement
         #endregion
     }
 }
+

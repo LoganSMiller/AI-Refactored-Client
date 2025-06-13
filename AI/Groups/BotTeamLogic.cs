@@ -11,6 +11,7 @@ namespace AIRefactored.AI.Groups
     using System;
     using System.Collections.Generic;
     using System.Threading.Tasks;
+    using AIRefactored.AI;
     using AIRefactored.AI.Combat;
     using AIRefactored.AI.Core;
     using AIRefactored.AI.Helpers;
@@ -23,27 +24,31 @@ namespace AIRefactored.AI.Groups
     using Random = UnityEngine.Random;
 
     /// <summary>
-    /// Squad-level tactical coordinator for fallback, enemy sync, regrouping, and mission broadcasts.
-    /// Driven by BotBrain. All errors are bulletproofed and all async logic is self-contained.
-    /// All squad movement is arbitration/overlay only, with no internal cooldowns.
+    /// Ultimate squad tactical logic: fallback, enemy comms, mission sync, dynamic regrouping, async error isolation.
+    /// Arbitration/event/overlay-only. No disables or teleports. Fully multiplayer/headless safe.
+    /// Personality-aware, context-driven, bulletproof.
     /// </summary>
     public sealed class BotTeamLogic
     {
         #region Constants
 
-        private const float RegroupJitterRadius = 1.5f;
-        private const float MinMoveDeltaSqr = 0.22f;
+        private const float RegroupJitterRadius = 1.55f;
+        private const float MinMoveDeltaSqr = 0.13f;
+        private const float MaxCommsRadius = 22.2f;
+        private const float SquadDangerZonePersist = 1.99f;
+        private static readonly float MaxCommsRadiusSqr = MaxCommsRadius * MaxCommsRadius;
 
         #endregion
 
         #region Fields
 
         private readonly BotOwner _bot;
-        private readonly Dictionary<BotOwner, CombatStateMachine> _combatMap = new Dictionary<BotOwner, CombatStateMachine>(8);
         private readonly List<BotOwner> _teammates = new List<BotOwner>(8);
+        private readonly Dictionary<BotOwner, CombatStateMachine> _combatMap = new Dictionary<BotOwner, CombatStateMachine>(8);
 
-        // Last issued target for deduplication
         private Vector3 _lastMoveTarget = Vector3.zero;
+        private float _lastSquadDangerBroadcast = -99f;
+        private Vector3 _lastSquadDangerPosition = Vector3.zero;
 
         #endregion
 
@@ -61,7 +66,7 @@ namespace AIRefactored.AI.Groups
         #region Public API
 
         /// <summary>
-        /// Shares an enemy with all squadmates (delayed, async, bulletproof).
+        /// Shares an enemy IPlayer with all squadmates (delayed/async, arbitration-safe, error-isolated).
         /// </summary>
         public static void AddEnemy(BotOwner bot, IPlayer target)
         {
@@ -89,7 +94,7 @@ namespace AIRefactored.AI.Groups
         }
 
         /// <summary>
-        /// Broadcasts a squad mission (voice) to all squadmates (async, no spam, safe).
+        /// Broadcasts a squad mission (voice) to all squadmates (async, safe, randomized timing).
         /// </summary>
         public static void BroadcastMissionType(BotOwner bot, MissionType mission)
         {
@@ -121,8 +126,7 @@ namespace AIRefactored.AI.Groups
         }
 
         /// <summary>
-        /// Broadcasts fallback/retreat to all squadmates (async, bulletproof).
-        /// Fallback moves are overlay/event-driven, strictly NavMesh/one-shot, never direct position, no teleport.
+        /// Broadcasts fallback/retreat to all squadmates (async, error-shielded, overlay-only, never disables or teleports).
         /// </summary>
         public void BroadcastFallback(Vector3 retreatPoint)
         {
@@ -141,7 +145,7 @@ namespace AIRefactored.AI.Groups
         }
 
         /// <summary>
-        /// Shares an enemy (target) with all teammates (async, bulletproof).
+        /// Shares an enemy (target) with all teammates (async, error-shielded).
         /// </summary>
         public void ShareTarget(IPlayer enemy)
         {
@@ -169,7 +173,8 @@ namespace AIRefactored.AI.Groups
         }
 
         /// <summary>
-        /// Regroups squadmates toward the squad center, arbitration-only, NavMesh/one-shot, never teleports.
+        /// Regroups squadmates to the squad center, arbitration-only overlay movement (never disables/teleports, deduped).
+        /// Personality-aware spacing, squad role-aware dynamic formation, micro-drift for realism.
         /// </summary>
         public void CoordinateMovement()
         {
@@ -178,12 +183,12 @@ namespace AIRefactored.AI.Groups
                 if (_bot == null || _bot.IsDead || _teammates.Count == 0)
                     return;
 
-                // Only one overlay-driven move per bot per intent at a time.
                 if (!BotOverlayManager.CanIssueMove(_bot, BotOverlayType.SquadMove))
                     return;
 
                 Vector3 center = Vector3.zero;
                 int count = 0;
+                float cohesionSum = 0f;
 
                 for (int i = 0; i < _teammates.Count; i++)
                 {
@@ -191,6 +196,7 @@ namespace AIRefactored.AI.Groups
                     if (EFTPlayerUtil.IsValidBotOwner(mate))
                     {
                         center += mate.Position;
+                        if (BotRegistry.TryGet(mate.ProfileId, out var p)) cohesionSum += p.Cohesion;
                         count++;
                     }
                 }
@@ -199,23 +205,30 @@ namespace AIRefactored.AI.Groups
                     return;
 
                 center /= count;
-                Vector3 jitter = UnityEngine.Random.insideUnitSphere * RegroupJitterRadius;
+                float squadCohesion = cohesionSum / count;
+                float spread = 2.4f + 1.2f * (1f - squadCohesion); // tighter for cohesive squads
+
+                // Realistic formation: project a circle around the center (if more than 2 bots)
+                int myIdx = 0, squadCount = _teammates.Count + 1;
+                for (int i = 0; i < _teammates.Count; i++)
+                    if (_teammates[i] == _bot) myIdx = i + 1; // slot 1 after teammate list
+
+                float angle = 2 * Mathf.PI * myIdx / squadCount;
+                Vector3 formationOffset = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * spread;
+
+                Vector3 jitter = UnityEngine.Random.insideUnitSphere * RegroupJitterRadius * (1f - squadCohesion + 0.25f);
                 jitter.y = 0f;
 
-                Vector3 target = center + jitter;
+                Vector3 target = center + formationOffset + jitter;
 
-                // Only issue if sufficiently different from last move (deduplication)
                 if ((target - _lastMoveTarget).sqrMagnitude > MinMoveDeltaSqr)
                 {
-                    // NavMesh-validate, clamp Y, micro-drift.
                     if (BotNavHelper.TryGetNavMeshSafePosition(target, _bot.Position, out Vector3 navSafe))
                     {
-                        Vector3 drifted = BotMovementHelper.ApplyMicroDrift(navSafe, _bot.ProfileId, Time.frameCount,
-                            BotRegistry.GetOrGenerate(_bot.ProfileId, PersonalityType.Balanced, _bot.Profile?.Info?.Settings?.Role ?? WildSpawnType.assault));
-                        BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: 1f);
-
+                        var profile = BotRegistry.GetOrRegister(_bot);
+                        Vector3 drifted = BotMovementHelper.ApplyMicroDrift(navSafe, _bot.ProfileId, Time.frameCount, profile);
+                        BotMovementHelper.SmoothMoveToSafe(_bot, drifted, slow: true, cohesion: profile.Cohesion);
                         _lastMoveTarget = drifted;
-                        // Arbitration: claim overlay slot for this intent (release at end of tick if needed)
                         BotOverlayManager.RegisterMove(_bot, BotOverlayType.SquadMove);
                     }
                 }
@@ -224,7 +237,37 @@ namespace AIRefactored.AI.Groups
         }
 
         /// <summary>
-        /// Wires squadmate combat FSM for coordinated events.
+        /// Squad danger broadcast (panic, suppression, grenade) to all alive teammates (arbitration/event, async error shielded).
+        /// </summary>
+        public void BroadcastDanger(Vector3 dangerPos)
+        {
+            float now = Time.time;
+            if ((dangerPos - _lastSquadDangerPosition).sqrMagnitude < 2.25f && now - _lastSquadDangerBroadcast < SquadDangerZonePersist)
+                return;
+
+            _lastSquadDangerPosition = dangerPos;
+            _lastSquadDangerBroadcast = now;
+
+            for (int i = 0; i < _teammates.Count; i++)
+            {
+                BotOwner mate = _teammates[i];
+                if (!EFTPlayerUtil.IsValidBotOwner(mate) || mate == _bot) continue;
+                if ((mate.Position - dangerPos).sqrMagnitude < MaxCommsRadiusSqr)
+                {
+                    try
+                    {
+                        if (BotComponentCacheRegistry.TryGetByPlayer(mate.GetPlayer, out var cache) && cache?.PanicHandler != null)
+                        {
+                            cache.PanicHandler.TriggerPanic("squad-danger");
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Wires squadmate combat FSMs for event overlays, fallback, and group comms.
         /// </summary>
         public void InjectCombatState(BotOwner mate, CombatStateMachine fsm)
         {
@@ -233,7 +276,7 @@ namespace AIRefactored.AI.Groups
         }
 
         /// <summary>
-        /// Assigns all teammates for use in comms and regroup logic.
+        /// Sets all current teammates for use in comms and regroup logic. Always called by BotBrain.
         /// </summary>
         public void SetTeammates(List<BotOwner> allBots)
         {
@@ -262,7 +305,7 @@ namespace AIRefactored.AI.Groups
 
         #endregion
 
-        #region Internals
+        #region Internals (Async, Arbitration, Bulletproof)
 
         private static async Task TriggerDelayedRegisterEnemy(BotOwner receiver, IPlayer enemy, float delay)
         {
@@ -288,6 +331,9 @@ namespace AIRefactored.AI.Groups
             catch { }
         }
 
+        /// <summary>
+        /// Registers an enemy into the bots' memory and group. Event/arbitration only.
+        /// </summary>
         private static void ForceRegisterEnemy(BotOwner receiver, IPlayer enemy)
         {
             try

@@ -20,18 +20,20 @@ namespace AIRefactored.AI.Optimization
     using UnityEngine;
 
     /// <summary>
-    /// High-performance, bulletproof dispatcher for background bot workloads.
-    /// All failures are isolated, never leak across raids/domains. Pooled, SPT/FIKA/headless/client compliant.
-    /// No Unity API in background. Adaptive thread pool, live stats, starvation and deadlock prevention.
+    /// Maximum performance, error-contained, pooled dispatcher for background AI workloads.
+    /// - Adaptive threads, bulletproof isolation, starvation/overload stats, SPT/FIKA/headless/client safe.
+    /// - Never uses Unity API in background. All domain/raid reload safe.
     /// </summary>
     public static class BotWorkGroupDispatcher
     {
         #region Constants
 
-        private const int MaxWorkPerTick = 256;
+        private const int MaxWorkPerTick = 320;
         private const int MaxThreads = 16;
-        private const float ThreadVariance = 0.08f;   // 8% random micro-variance in thread count for realism.
-        private const int StarvationThresholdTicks = 7; // Max ticks before starvation warning.
+        private const float ThreadVariance = 0.12f;
+        private const int StarvationThresholdTicks = 8;
+        private const int MaxConcurrentTasks = 40;
+        private const int MaxQueueLimit = 500;
 
         #endregion
 
@@ -39,8 +41,7 @@ namespace AIRefactored.AI.Optimization
 
         private static readonly object Sync = new object();
         private static readonly ManualLogSource Log = Plugin.LoggerInstance;
-        private static readonly List<IBotWorkload> WorkQueue = new List<IBotWorkload>(MaxWorkPerTick);
-
+        private static readonly List<IBotWorkload> WorkQueue = new List<IBotWorkload>(MaxQueueLimit);
         private static int ThreadCount
         {
             get
@@ -52,9 +53,10 @@ namespace AIRefactored.AI.Optimization
             }
         }
 
-        // Starvation protection: track how many ticks jobs sit idle
+        // Starvation protection.
         private static int StarvationTicks = 0;
         private static int PeakQueued = 0;
+        private static int PeakConcurrentTasks = 0;
 
         #endregion
 
@@ -71,9 +73,9 @@ namespace AIRefactored.AI.Optimization
             {
                 lock (Sync)
                 {
-                    if (WorkQueue.Count >= MaxWorkPerTick)
+                    if (WorkQueue.Count >= MaxQueueLimit)
                     {
-                        LogIfNotHeadless("[BotWorkGroupDispatcher] Work queue full (" + WorkQueue.Count + "); dropping workload.");
+                        LogIfNotHeadless($"[BotWorkGroupDispatcher] Work queue FULL ({WorkQueue.Count}); dropping workload.");
                         return;
                     }
                     WorkQueue.Add(workload);
@@ -106,7 +108,6 @@ namespace AIRefactored.AI.Optimization
                         StarvationTicks = 0;
                         return;
                     }
-
                     batchCount = Math.Min(WorkQueue.Count, MaxWorkPerTick);
                     batch = TempListPool.Rent<IBotWorkload>();
                     for (int i = 0; i < batchCount; i++)
@@ -158,6 +159,7 @@ namespace AIRefactored.AI.Optimization
                 WorkQueue.Clear();
                 PeakQueued = 0;
                 StarvationTicks = 0;
+                PeakConcurrentTasks = 0;
             }
         }
 
@@ -168,7 +170,7 @@ namespace AIRefactored.AI.Optimization
         {
             lock (Sync)
             {
-                return $"Queued:{WorkQueue.Count} Peak:{PeakQueued} Starvation:{StarvationTicks} Threads:{ThreadCount}";
+                return $"Queued:{WorkQueue.Count} PeakQueued:{PeakQueued} PeakTasks:{PeakConcurrentTasks} Starvation:{StarvationTicks} Threads:{ThreadCount}";
             }
         }
 
@@ -189,6 +191,7 @@ namespace AIRefactored.AI.Optimization
             int blockSize = Mathf.CeilToInt(total / (float)threads);
 
             CountdownEvent done = new CountdownEvent(threads);
+            int concurrentTasks = 0;
 
             for (int t = 0; t < threads; t++)
             {
@@ -201,6 +204,7 @@ namespace AIRefactored.AI.Optimization
 
                 int end = Math.Min(start + blockSize, total);
 
+                Interlocked.Increment(ref concurrentTasks);
                 Task.Run(() =>
                 {
                     for (int i = start; i < end; i++)
@@ -222,10 +226,13 @@ namespace AIRefactored.AI.Optimization
                 });
             }
 
+            // Track peak concurrent tasks for stats/monitoring
+            PeakConcurrentTasks = Math.Max(PeakConcurrentTasks, concurrentTasks);
+
             // Wait for batch to complete, but never block main/game thread.
             Task.Run(() =>
             {
-                try { done.Wait(2000); }
+                try { done.Wait(1800); }
                 catch { }
                 finally { done.Dispose(); }
             });

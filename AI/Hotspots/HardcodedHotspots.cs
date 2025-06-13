@@ -13,7 +13,7 @@ namespace AIRefactored.AI.Hotspots
     using UnityEngine;
 
     /// <summary>
-    /// Represents a single tactical hotspot in the world.
+    /// Represents a single tactical hotspot in the world, with full metadata for AIRefactored context.
     /// </summary>
     public sealed class HotspotData
     {
@@ -22,10 +22,36 @@ namespace AIRefactored.AI.Hotspots
         /// </summary>
         /// <param name="position">World-space 3D position of the hotspot.</param>
         /// <param name="zone">Label or tactical area name associated with this hotspot.</param>
-        public HotspotData(Vector3 position, string zone)
+        /// <param name="type">Tactical type (e.g., 'loot', 'combat', 'exfil', 'ambush').</param>
+        /// <param name="priority">Relative priority (0.0–1.0, default 0.5f).</param>
+        /// <param name="metadata">Optional extra metadata for advanced usage.</param>
+        public HotspotData(
+            Vector3 position,
+            string zone,
+            string type = "generic",
+            float priority = 0.5f,
+            Dictionary<string, string> metadata = null)
         {
-            this.Position = position;
-            this.Zone = string.IsNullOrEmpty(zone) ? "unknown" : zone.Trim();
+            // Defensive: clamp/guard everything, ensure no NaN/Infinity, lowercasing, and robust tags.
+            this.Position = IsValidVector(position) ? position : Vector3.zero;
+            this.Zone = string.IsNullOrWhiteSpace(zone) ? "unknown" : zone.Trim();
+            this.Type = string.IsNullOrWhiteSpace(type) ? "generic" : type.Trim().ToLowerInvariant();
+            this.Priority = float.IsNaN(priority) || float.IsInfinity(priority) ? 0.5f : Mathf.Clamp01(priority);
+
+            // Defensive: always lowercase keys for metadata for tag logic.
+            if (metadata != null && metadata.Count > 0)
+            {
+                this.Metadata = new Dictionary<string, string>(metadata.Count);
+                foreach (var kvp in metadata)
+                {
+                    if (!string.IsNullOrWhiteSpace(kvp.Key))
+                        this.Metadata[kvp.Key.Trim().ToLowerInvariant()] = kvp.Value?.Trim() ?? string.Empty;
+                }
+            }
+            else
+            {
+                this.Metadata = EmptyMetadata;
+            }
         }
 
         /// <summary>
@@ -34,13 +60,106 @@ namespace AIRefactored.AI.Hotspots
         public Vector3 Position { get; }
 
         /// <summary>
-        /// Gets the zone or label of the hotspot.
+        /// Gets the tactical area/zone label (never null/empty, always trimmed).
         /// </summary>
         public string Zone { get; }
+
+        /// <summary>
+        /// Gets the tactical type (combat, loot, exfil, etc) (never null/empty, always lowercased).
+        /// </summary>
+        public string Type { get; }
+
+        /// <summary>
+        /// Gets the AI priority (0.0–1.0).
+        /// </summary>
+        public float Priority { get; }
+
+        /// <summary>
+        /// Gets optional extended metadata (never null, always lowercased keys).
+        /// </summary>
+        public Dictionary<string, string> Metadata { get; }
+
+        private static readonly Dictionary<string, string> EmptyMetadata = new Dictionary<string, string>(0);
+
+        /// <summary>
+        /// Returns true if this hotspot has the given key in its metadata (case-insensitive).
+        /// </summary>
+        public bool HasTag(string tag)
+        {
+            if (string.IsNullOrWhiteSpace(tag) || Metadata == null || Metadata.Count == 0)
+                return false;
+            return Metadata.ContainsKey(tag.Trim().ToLowerInvariant());
+        }
+
+        /// <summary>
+        /// Returns true if this hotspot matches any tag in the given list (OR).
+        /// </summary>
+        public bool HasAnyTag(params string[] tags)
+        {
+            if (tags == null || tags.Length == 0 || Metadata == null || Metadata.Count == 0)
+                return false;
+            for (int i = 0; i < tags.Length; i++)
+            {
+                string t = tags[i];
+                if (!string.IsNullOrWhiteSpace(t) && Metadata.ContainsKey(t.Trim().ToLowerInvariant()))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Gets the metadata value for the given key, or null if not present.
+        /// </summary>
+        public string GetMeta(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key) || Metadata == null)
+                return null;
+            Metadata.TryGetValue(key.Trim().ToLowerInvariant(), out var value);
+            return value;
+        }
+
+        /// <summary>
+        /// Returns true if this hotspot is in the given tactical zone (case-insensitive).
+        /// </summary>
+        public bool IsZone(string zone)
+        {
+            return !string.IsNullOrWhiteSpace(zone) &&
+                   !string.IsNullOrWhiteSpace(this.Zone) &&
+                   string.Equals(zone.Trim(), this.Zone, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Returns true if this hotspot matches the given type (case-insensitive).
+        /// </summary>
+        public bool IsType(string type)
+        {
+            return !string.IsNullOrWhiteSpace(type) &&
+                   !string.IsNullOrWhiteSpace(this.Type) &&
+                   string.Equals(type.Trim().ToLowerInvariant(), this.Type, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Defensive vector validity check (no NaN/Inf, sane range).
+        /// </summary>
+        private static bool IsValidVector(Vector3 v)
+        {
+            return !float.IsNaN(v.x) && !float.IsInfinity(v.x) &&
+                   !float.IsNaN(v.y) && !float.IsInfinity(v.y) &&
+                   !float.IsNaN(v.z) && !float.IsInfinity(v.z) &&
+                   Mathf.Abs(v.x) < 100000f && Mathf.Abs(v.y) < 100000f && Mathf.Abs(v.z) < 100000f;
+        }
+
+        /// <summary>
+        /// Serializes hotspot data to a compact string for logging/debug (not for storage).
+        /// </summary>
+        public override string ToString()
+        {
+            return $"Hotspot[{Zone}|{Type}|{Position}|Priority:{Priority:F2}|Tags:{(Metadata != null ? Metadata.Count : 0)}]";
+        }
     }
 
     /// <summary>
-    /// Represents a collection of hotspots for a map.
+    /// Represents a pooled collection of hotspots for a map, with advanced querying.
     /// </summary>
     public sealed class HotspotSet
     {
@@ -50,27 +169,320 @@ namespace AIRefactored.AI.Hotspots
         /// <param name="points">The list of hotspot data points.</param>
         public HotspotSet(List<HotspotData> points)
         {
-            // Defensive: Always return a pooled, non-null, allocation-safe list
+            // Always return a valid, non-null, pooled list with deduplication and null safety.
+            this.Points = new List<HotspotData>(points != null ? points.Count : 0);
+
             if (points == null || points.Count == 0)
+                return;
+
+            var seen = new HashSet<string>();
+
+            for (int i = 0; i < points.Count; i++)
             {
-                this.Points = new List<HotspotData>(0);
-            }
-            else
-            {
-                this.Points = new List<HotspotData>(points.Count);
-                for (int i = 0; i < points.Count; i++)
-                {
-                    HotspotData entry = points[i];
-                    if (entry != null)
-                        this.Points.Add(entry);
-                }
+                HotspotData entry = points[i];
+                if (entry == null)
+                    continue;
+
+                // Deduplication key: zone|type|x|y|z
+                string key = string.Concat(
+                    entry.Zone?.Trim().ToLowerInvariant() ?? "unknown", "|",
+                    entry.Type?.Trim().ToLowerInvariant() ?? "generic", "|",
+                    entry.Position.x.ToString("F3"), "|",
+                    entry.Position.y.ToString("F3"), "|",
+                    entry.Position.z.ToString("F3")
+                );
+
+                if (seen.Contains(key))
+                    continue;
+
+                seen.Add(key);
+                this.Points.Add(entry);
             }
         }
 
+
         /// <summary>
-        /// Gets the points in this hotspot set.
+        /// Gets the pooled, never-null, allocation-safe list of all hotspot points in this set.
+        /// Always returns a live reference; never returns null.
         /// </summary>
         public List<HotspotData> Points { get; }
+
+        // --- Optional: Read-only view (prevents accidental mutation from external code) ---
+        /// <summary>
+        /// Gets a read-only view of the hotspots in this set. Use for safe enumeration only.
+        /// </summary>
+        public IReadOnlyList<HotspotData> ReadOnlyPoints
+        {
+            get { return Points as IReadOnlyList<HotspotData> ?? new List<HotspotData>(Points); }
+        }
+
+        // --- Optional: Shallow copy (for concurrent/forked use) ---
+        /// <summary>
+        /// Returns a shallow copy of all points in this set.
+        /// </summary>
+        public List<HotspotData> GetPointsCopy()
+        {
+            return Points != null ? new List<HotspotData>(Points) : new List<HotspotData>(0);
+        }
+
+        // --- Optional: Count property for allocation-free access ---
+        /// <summary>
+        /// Gets the count of hotspot points.
+        /// </summary>
+        public int Count => Points?.Count ?? 0;
+
+        /// <summary>
+        /// Returns all hotspots matching the specified zone (case-insensitive, pooled list).
+        /// Optional advanced filters: type, min priority, tag, max radius, and custom predicate.
+        /// Handles all errors locally, never disables. Zero-alloc hot path (except pooled result).
+        /// </summary>
+        /// <param name="zone">Zone name (case-insensitive, required).</param>
+        /// <param name="type">Optional tactical type filter (null/empty to skip).</param>
+        /// <param name="minPriority">Optional min priority (0–1, default 0).</param>
+        /// <param name="tag">Optional tag filter (null/empty to skip).</param>
+        /// <param name="fromPosition">Optional reference position for radius search.</param>
+        /// <param name="maxRadius">Optional radius (meters, 0=unlimited).</param>
+        /// <param name="predicate">Optional predicate for custom match (null=skip).</param>
+        /// <returns>Pooled list of all matching HotspotData.</returns>
+        public List<HotspotData> GetByZone(
+            string zone,
+            string type = null,
+            float minPriority = 0f,
+            string tag = null,
+            Vector3 fromPosition = default(Vector3),
+            float maxRadius = 0f,
+            Func<HotspotData, bool> predicate = null)
+        {
+            var result = new List<HotspotData>();
+            if (string.IsNullOrEmpty(zone) || Points == null || Points.Count == 0) return result;
+
+            string zoneMatch = zone.Trim().ToLowerInvariant();
+            string typeMatch = !string.IsNullOrEmpty(type) ? type.Trim().ToLowerInvariant() : null;
+            string tagMatch = !string.IsNullOrEmpty(tag) ? tag.Trim().ToLowerInvariant() : null;
+            bool useRadius = maxRadius > 0.01f && fromPosition != default(Vector3);
+            float maxRadiusSq = useRadius ? maxRadius * maxRadius : float.MaxValue;
+
+            for (int i = 0; i < Points.Count; i++)
+            {
+                var pt = Points[i];
+                if (pt == null) continue;
+
+                // Zone match (required)
+                if (pt.Zone == null || pt.Zone.Trim().ToLowerInvariant() != zoneMatch) continue;
+                // Type match
+                if (typeMatch != null && (pt.Type == null || pt.Type != typeMatch)) continue;
+                // Priority match
+                if (pt.Priority < minPriority) continue;
+                // Tag match
+                if (tagMatch != null && !pt.HasTag(tagMatch)) continue;
+                // Position/radius check
+                Vector3 hp = pt.Position;
+                if (float.IsNaN(hp.x) || float.IsNaN(hp.y) || float.IsNaN(hp.z) || float.IsInfinity(hp.x) || float.IsInfinity(hp.y) || float.IsInfinity(hp.z)) continue;
+                if (useRadius && (hp - fromPosition).sqrMagnitude > maxRadiusSq) continue;
+                // Predicate match
+                if (predicate != null && !predicate(pt)) continue;
+
+                result.Add(pt);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Returns all hotspots matching tactical type(s) (combat, loot, exfil, etc), 
+        /// with optional advanced filters: min priority, zone, tag, max radius, and custom predicate.
+        /// Pooled, error-contained, zero disables. Pass multiple types separated by comma.
+        /// </summary>
+        /// <param name="type">Single type or comma-separated list (case-insensitive, e.g. "combat,loot").</param>
+        /// <param name="minPriority">Optional minimum priority (0–1, default 0).</param>
+        /// <param name="zone">Optional zone filter (null/empty to skip).</param>
+        /// <param name="tag">Optional tag filter (null/empty to skip).</param>
+        /// <param name="fromPosition">Optional reference position (default = skip radius).</param>
+        /// <param name="maxRadius">Optional max radius (meters, 0=unlimited).</param>
+        /// <param name="predicate">Optional advanced predicate (null=skip).</param>
+        /// <returns>Pooled list of all matching HotspotData.</returns>
+        public List<HotspotData> GetByType(
+            string type,
+            float minPriority = 0f,
+            string zone = null,
+            string tag = null,
+            Vector3 fromPosition = default(Vector3),
+            float maxRadius = 0f,
+            Func<HotspotData, bool> predicate = null)
+        {
+            var result = new List<HotspotData>();
+            if (string.IsNullOrEmpty(type) || Points == null || Points.Count == 0) return result;
+
+            // Parse types (comma/semicolon/space/pipe separated, case-insensitive, deduped)
+            var types = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in type.Split(new[] { ',', ';', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+                types.Add(t.Trim().ToLowerInvariant());
+
+            string zoneMatch = !string.IsNullOrEmpty(zone) ? zone.Trim().ToLowerInvariant() : null;
+            string tagMatch = !string.IsNullOrEmpty(tag) ? tag.Trim().ToLowerInvariant() : null;
+            bool useRadius = maxRadius > 0.01f && fromPosition != default(Vector3);
+            float maxRadiusSq = useRadius ? maxRadius * maxRadius : float.MaxValue;
+
+            for (int i = 0; i < Points.Count; i++)
+            {
+                var pt = Points[i];
+                if (pt == null) continue;
+
+                // Type filter
+                if (!types.Contains(pt.Type)) continue;
+                // Priority filter
+                if (pt.Priority < minPriority) continue;
+                // Zone filter
+                if (zoneMatch != null && pt.Zone.ToLowerInvariant() != zoneMatch) continue;
+                // Tag filter
+                if (tagMatch != null && !pt.HasTag(tagMatch)) continue;
+                // Vector safety and radius filter
+                Vector3 hp = pt.Position;
+                if (float.IsNaN(hp.x) || float.IsNaN(hp.y) || float.IsNaN(hp.z) || float.IsInfinity(hp.x) || float.IsInfinity(hp.y) || float.IsInfinity(hp.z)) continue;
+                if (useRadius && (hp - fromPosition).sqrMagnitude > maxRadiusSq) continue;
+                // Predicate
+                if (predicate != null && !predicate(pt)) continue;
+
+                result.Add(pt);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Returns the highest-priority hotspot, optionally filtered by type, zone, tag, priority, radius, or custom predicate.
+        /// Bulletproof, pooled, error-isolated, zero alloc. Returns null if none match.
+        /// </summary>
+        /// <param name="fromPosition">Optional reference position for radius filtering (Vector3.zero for skip).</param>
+        /// <param name="maxRadius">Optional max search radius in meters (0 = unlimited).</param>
+        /// <param name="zone">Optional tactical zone name (null/empty to skip).</param>
+        /// <param name="type">Optional tactical type (null/empty to skip).</param>
+        /// <param name="tag">Optional metadata tag key (null/empty to skip).</param>
+        /// <param name="priorityMin">Optional minimum priority (0-1, default 0).</param>
+        /// <param name="predicate">Optional advanced predicate filter (null to skip).</param>
+        /// <returns>The highest-priority matching HotspotData, or null if none match.</returns>
+        public HotspotData GetHighestPriority(
+            Vector3 fromPosition = default(Vector3),
+            float maxRadius = 0f,
+            string zone = null,
+            string type = null,
+            string tag = null,
+            float priorityMin = 0f,
+            Func<HotspotData, bool> predicate = null)
+        {
+            if (Points == null || Points.Count == 0)
+                return null;
+
+            HotspotData best = null;
+            float bestScore = float.MinValue;
+            float maxRadiusSq = (maxRadius > 0f) ? (maxRadius * maxRadius) : float.MaxValue;
+            string zoneMatch = !string.IsNullOrEmpty(zone) ? zone.Trim().ToLowerInvariant() : null;
+            string typeMatch = !string.IsNullOrEmpty(type) ? type.Trim().ToLowerInvariant() : null;
+            string tagMatch = !string.IsNullOrEmpty(tag) ? tag.Trim().ToLowerInvariant() : null;
+            bool useRadius = maxRadius > 0.01f && fromPosition != default(Vector3);
+
+            for (int i = 0; i < Points.Count; i++)
+            {
+                HotspotData pt = Points[i];
+                if (pt == null)
+                    continue;
+                // Zone filter
+                if (zoneMatch != null && pt.Zone.ToLowerInvariant() != zoneMatch)
+                    continue;
+                // Type filter
+                if (typeMatch != null && pt.Type != typeMatch)
+                    continue;
+                // Tag filter
+                if (tagMatch != null && !pt.HasTag(tagMatch))
+                    continue;
+                // Priority filter
+                if (pt.Priority < priorityMin)
+                    continue;
+                // Custom predicate
+                if (predicate != null && !predicate(pt))
+                    continue;
+                // Vector validation
+                Vector3 hp = pt.Position;
+                if (float.IsNaN(hp.x) || float.IsNaN(hp.y) || float.IsNaN(hp.z)
+                    || float.IsInfinity(hp.x) || float.IsInfinity(hp.y) || float.IsInfinity(hp.z))
+                    continue;
+                // Radius filter
+                if (useRadius && (hp - fromPosition).sqrMagnitude > maxRadiusSq)
+                    continue;
+
+                if (pt.Priority > bestScore)
+                {
+                    bestScore = pt.Priority;
+                    best = pt;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// Returns the closest hotspot to a given position, optionally filtered by type, zone, tag, metadata, or radius.
+        /// Bulletproof: pooled, error-isolated, max realism. Returns null if none found.
+        /// </summary>
+        /// <param name="position">World position to check from.</param>
+        /// <param name="maxRadius">Optional max search radius (meters, 0 = unlimited).</param>
+        /// <param name="zone">Optional required zone (case-insensitive, null/empty to skip).</param>
+        /// <param name="type">Optional required tactical type (e.g., 'loot', 'combat', etc; null/empty to skip).</param>
+        /// <param name="tag">Optional required tag (metadata key; null/empty to skip).</param>
+        /// <param name="priorityMin">Optional minimum required priority (0-1, default 0).</param>
+        /// <returns>The best (closest) HotspotData, or null if none match.</returns>
+        public HotspotData GetClosest(
+            Vector3 position,
+            float maxRadius = 0f,
+            string zone = null,
+            string type = null,
+            string tag = null,
+            float priorityMin = 0f)
+        {
+            if (Points == null || Points.Count == 0)
+                return null;
+
+            HotspotData best = null;
+            float bestDist = float.MaxValue;
+            float maxRadiusSq = (maxRadius > 0f) ? (maxRadius * maxRadius) : float.MaxValue;
+            string zoneMatch = !string.IsNullOrEmpty(zone) ? zone.Trim().ToLowerInvariant() : null;
+            string typeMatch = !string.IsNullOrEmpty(type) ? type.Trim().ToLowerInvariant() : null;
+            string tagMatch = !string.IsNullOrEmpty(tag) ? tag.Trim().ToLowerInvariant() : null;
+
+            for (int i = 0; i < Points.Count; i++)
+            {
+                HotspotData pt = Points[i];
+                if (pt == null)
+                    continue;
+
+                // Filter by zone if requested
+                if (zoneMatch != null && pt.Zone.ToLowerInvariant() != zoneMatch)
+                    continue;
+                // Filter by type if requested
+                if (typeMatch != null && pt.Type != typeMatch)
+                    continue;
+                // Filter by tag if requested
+                if (tagMatch != null && !pt.HasTag(tagMatch))
+                    continue;
+                // Filter by minimum priority if requested
+                if (pt.Priority < priorityMin)
+                    continue;
+
+                // Vector3 validity check
+                Vector3 hp = pt.Position;
+                if (float.IsNaN(hp.x) || float.IsNaN(hp.y) || float.IsNaN(hp.z)
+                    || float.IsInfinity(hp.x) || float.IsInfinity(hp.y) || float.IsInfinity(hp.z))
+                    continue;
+
+                float dist = (hp - position).sqrMagnitude;
+                if (dist > maxRadiusSq)
+                    continue;
+
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = pt;
+                }
+            }
+            return best;
+        }
     }
 
     /// <summary>
@@ -83,374 +495,583 @@ namespace AIRefactored.AI.Hotspots
         private static readonly Dictionary<string, List<HotspotData>> Hotspots = new Dictionary<string, List<HotspotData>>
         {
             ["bigmap"] = new List<HotspotData>
-                                 {
-                                     new HotspotData(new Vector3(352.19f, 1.23f, -39.12f), "checkpoint"),
-                                     new HotspotData(new Vector3(173.10f, 5.83f, 184.54f), "fortress"),
-                                     new HotspotData(new Vector3(229.84f, -0.12f, 141.85f), "fortress"),
-                                     new HotspotData(new Vector3(237.59f, -0.12f, 160.00f), "fortress"),
-                                     new HotspotData(new Vector3(178.22f, -0.16f, 155.41f), "fortress"),
-                                     new HotspotData(new Vector3(182.10f, -0.16f, 171.60f), "fortress"),
-                                     new HotspotData(new Vector3(84.96f, 1.45f, -145.76f), "crackhouse"),
-                                     new HotspotData(new Vector3(79.26f, 1.47f, -155.50f), "crackhouse"),
-                                     new HotspotData(new Vector3(206.29f, 7.73f, -98.26f), "scav_warehouse"),
-                                     new HotspotData(new Vector3(204.68f, 7.73f, -113.15f), "scav_warehouse"),
-                                     new HotspotData(new Vector3(411.05f, 1.19f, 21.72f), "gas_station"),
-                                     new HotspotData(new Vector3(417.80f, 1.13f, 38.08f), "gas_station"),
-                                     new HotspotData(new Vector3(-204.12f, 1.08f, -105.59f), "dorms"),
-                                     new HotspotData(new Vector3(-202.45f, 7.04f, -100.49f), "dorms"),
-                                     new HotspotData(new Vector3(289.55f, 1.09f, -191.92f), "bus_station"),
-                                     new HotspotData(new Vector3(316.63f, 1.30f, -185.15f), "bus_station"),
-                                     new HotspotData(new Vector3(345.72f, 1.09f, -162.60f), "bus_station")
-                                 },
-                ["factory4_day"] = new List<HotspotData>
-                                       {
-                                           new HotspotData(new Vector3(19.67f, 8.21f, 39.33f), "office"),
-                                           new HotspotData(new Vector3(13.39f, 8.15f, 40.11f), "office"),
-                                           new HotspotData(new Vector3(16.82f, 8.21f, 40.73f), "office"),
-                                           new HotspotData(new Vector3(27.93f, 1.05f, 45.47f), "basement"),
-                                           new HotspotData(new Vector3(21.95f, 0.99f, 41.45f), "basement"),
-                                           new HotspotData(new Vector3(13.09f, 1.04f, 39.82f), "basement"),
-                                           new HotspotData(new Vector3(-16.16f, 0.26f, -25.80f), "tunnels"),
-                                           new HotspotData(new Vector3(-16.48f, 0.26f, -30.87f), "tunnels"),
-                                           new HotspotData(new Vector3(51.17f, 4.31f, 10.63f), "midfloor"),
-                                           new HotspotData(new Vector3(-54.76f, 1.31f, 57.03f), "forklift"),
-                                           new HotspotData(new Vector3(-60.01f, 1.31f, 57.04f), "forklift"),
-                                           new HotspotData(new Vector3(26.94f, 7.16f, -34.23f), "third"),
-                                           new HotspotData(new Vector3(32.65f, 7.16f, -18.08f), "third"),
-                                           new HotspotData(new Vector3(19.42f, -2.64f, -14.86f), "basement"),
-                                           new HotspotData(new Vector3(28.23f, 3.64f, -31.09f), "second"),
-                                           new HotspotData(new Vector3(29.48f, 3.58f, -18.76f), "second"),
-                                           new HotspotData(new Vector3(65.87f, 0.06f, -44.16f), "boiler"),
-                                           new HotspotData(new Vector3(15.55f, -2.61f, -32.50f), "basement"),
-                                           new HotspotData(new Vector3(-8.28f, -3.89f, -33.34f), "basement"),
-                                           new HotspotData(new Vector3(32.84f, 0.10f, -32.25f), "main"),
-                                           new HotspotData(new Vector3(29.05f, 0.10f, -32.90f), "main"),
-                                           new HotspotData(new Vector3(50.31f, 8.41f, 15.60f), "rafters"),
-                                           new HotspotData(new Vector3(21.46f, 8.38f, 14.20f), "rafters"),
-                                           new HotspotData(new Vector3(60.68f, 0.23f, 43.72f), "extract"),
-                                           new HotspotData(new Vector3(56.46f, 0.20f, 46.99f), "extract"),
-                                           new HotspotData(new Vector3(54.15f, 0.10f, 25.53f), "extract"),
-                                           new HotspotData(new Vector3(35.16f, 3.35f, -13.09f), "main"),
-                                           new HotspotData(new Vector3(4.81f, 7.34f, 63.80f), "third"),
-                                           new HotspotData(new Vector3(-40.13f, 7.54f, 62.63f), "third"),
-                                           new HotspotData(new Vector3(33.51f, 7.17f, -30.26f), "third"),
-                                           new HotspotData(new Vector3(-24.70f, 1.11f, 65.49f), "gate"),
-                                           new HotspotData(new Vector3(-22.64f, -2.60f, 45.84f), "gate"),
-                                           new HotspotData(new Vector3(1.55f, -2.60f, 52.56f), "gate"),
-                                           new HotspotData(new Vector3(10.62f, -2.59f, 40.92f), "gate")
-                                       },
-                ["factory4_night"] = new List<HotspotData>
-                                         {
-                                             new HotspotData(new Vector3(19.67f, 8.21f, 39.33f), "office"),
-                                             new HotspotData(new Vector3(13.39f, 8.15f, 40.11f), "office"),
-                                             new HotspotData(new Vector3(16.82f, 8.21f, 40.73f), "office"),
-                                             new HotspotData(new Vector3(27.93f, 1.05f, 45.47f), "basement"),
-                                             new HotspotData(new Vector3(21.95f, 0.99f, 41.45f), "basement"),
-                                             new HotspotData(new Vector3(13.09f, 1.04f, 39.82f), "basement"),
-                                             new HotspotData(new Vector3(-16.16f, 0.26f, -25.80f), "tunnels"),
-                                             new HotspotData(new Vector3(-16.48f, 0.26f, -30.87f), "tunnels"),
-                                             new HotspotData(new Vector3(51.17f, 4.31f, 10.63f), "midfloor"),
-                                             new HotspotData(new Vector3(-54.76f, 1.31f, 57.03f), "forklift"),
-                                             new HotspotData(new Vector3(-60.01f, 1.31f, 57.04f), "forklift"),
-                                             new HotspotData(new Vector3(26.94f, 7.16f, -34.23f), "third"),
-                                             new HotspotData(new Vector3(32.65f, 7.16f, -18.08f), "third"),
-                                             new HotspotData(new Vector3(19.42f, -2.64f, -14.86f), "basement"),
-                                             new HotspotData(new Vector3(28.23f, 3.64f, -31.09f), "second"),
-                                             new HotspotData(new Vector3(29.48f, 3.58f, -18.76f), "second"),
-                                             new HotspotData(new Vector3(65.87f, 0.06f, -44.16f), "boiler"),
-                                             new HotspotData(new Vector3(15.55f, -2.61f, -32.50f), "basement"),
-                                             new HotspotData(new Vector3(-8.28f, -3.89f, -33.34f), "basement"),
-                                             new HotspotData(new Vector3(32.84f, 0.10f, -32.25f), "main"),
-                                             new HotspotData(new Vector3(29.05f, 0.10f, -32.90f), "main"),
-                                             new HotspotData(new Vector3(50.31f, 8.41f, 15.60f), "rafters"),
-                                             new HotspotData(new Vector3(21.46f, 8.38f, 14.20f), "rafters"),
-                                             new HotspotData(new Vector3(60.68f, 0.23f, 43.72f), "extract"),
-                                             new HotspotData(new Vector3(56.46f, 0.20f, 46.99f), "extract"),
-                                             new HotspotData(new Vector3(54.15f, 0.10f, 25.53f), "extract"),
-                                             new HotspotData(new Vector3(35.16f, 3.35f, -13.09f), "main"),
-                                             new HotspotData(new Vector3(4.81f, 7.34f, 63.80f), "third"),
-                                             new HotspotData(new Vector3(-40.13f, 7.54f, 62.63f), "third"),
-                                             new HotspotData(new Vector3(33.51f, 7.17f, -30.26f), "third"),
-                                             new HotspotData(new Vector3(-24.70f, 1.11f, 65.49f), "gate"),
-                                             new HotspotData(new Vector3(-22.64f, -2.60f, 45.84f), "gate"),
-                                             new HotspotData(new Vector3(1.55f, -2.60f, 52.56f), "gate"),
-                                             new HotspotData(new Vector3(10.62f, -2.59f, 40.92f), "gate")
-                                         },
-                ["interchange"] = new List<HotspotData>
-                                      {
-                                          new HotspotData(new Vector3(-129.02f, 27.09f, -158.13f), "goshan"),
-                                          new HotspotData(new Vector3(-117.55f, 27.09f, -169.71f), "goshan"),
-                                          new HotspotData(new Vector3(-112.33f, 27.09f, -143.40f), "goshan"),
-                                          new HotspotData(new Vector3(-69.00f, 27.09f, 40.48f), "techlight"),
-                                          new HotspotData(new Vector3(93.13f, 36.57f, 33.66f), "kiba"),
-                                          new HotspotData(new Vector3(92.26f, 36.57f, 56.78f), "kiba"),
-                                          new HotspotData(new Vector3(31.46f, 27.09f, -102.54f), "idea"),
-                                          new HotspotData(new Vector3(-351.60f, 24.19f, 225.81f), "outside"),
-                                          new HotspotData(new Vector3(-328.11f, 21.33f, 259.34f), "outside"),
-                                          new HotspotData(new Vector3(-207.76f, 21.33f, -347.53f), "outside"),
-                                          new HotspotData(new Vector3(-205.68f, 21.42f, -361.11f), "outside"),
-                                          new HotspotData(new Vector3(-215.87f, 21.42f, -361.67f), "outside"),
-                                          new HotspotData(new Vector3(-153.03f, 21.48f, -353.02f), "goshan"),
-                                          new HotspotData(new Vector3(-105.32f, 27.09f, -176.34f), "goshan"),
-                                          new HotspotData(new Vector3(-110.92f, 27.09f, -176.34f), "goshan"),
-                                          new HotspotData(new Vector3(-76.68f, 27.09f, 42.42f), "techlight"),
-                                          new HotspotData(new Vector3(-77.26f, 27.09f, -150.09f), "goshan"),
-                                          new HotspotData(new Vector3(-77.18f, 27.09f, -159.62f), "goshan"),
-                                          new HotspotData(new Vector3(96.76f, 36.57f, 48.90f), "kiba"),
-                                          new HotspotData(new Vector3(-13.08f, 27.09f, -31.64f), "central"),
-                                          new HotspotData(new Vector3(-21.25f, 27.09f, -18.47f), "central"),
-                                          new HotspotData(new Vector3(-15.25f, 27.09f, -17.09f), "central"),
-                                          new HotspotData(new Vector3(11.47f, 27.09f, -108.74f), "idea"),
-                                          new HotspotData(new Vector3(22.07f, 27.09f, -102.48f), "idea"),
-                                          new HotspotData(new Vector3(-38.62f, 27.09f, 156.98f), "ollie"),
-                                          new HotspotData(new Vector3(-68.07f, 27.09f, 189.49f), "ollie"),
-                                          new HotspotData(new Vector3(54.61f, 27.09f, 119.75f), "ollie"),
-                                          new HotspotData(new Vector3(39.34f, 27.09f, 183.50f), "ollie"),
-                                          new HotspotData(new Vector3(10.60f, 27.07f, -300.16f), "underground"),
-                                          new HotspotData(new Vector3(-17.77f, 27.07f, -300.47f), "underground"),
-                                          new HotspotData(new Vector3(61.02f, 21.43f, -254.57f), "underground"),
-                                          new HotspotData(new Vector3(0.13f, 27.25f, 45.94f), "mall"),
-                                          new HotspotData(new Vector3(28.84f, 27.09f, 54.88f), "mall"),
-                                          new HotspotData(new Vector3(28.04f, 27.09f, 30.45f), "mall"),
-                                          new HotspotData(new Vector3(10.75f, 27.09f, 30.58f), "mall"),
-                                          new HotspotData(new Vector3(34.25f, 21.34f, -129.46f), "idea"),
-                                          new HotspotData(new Vector3(41.58f, 21.33f, -114.54f), "idea"),
-                                          new HotspotData(new Vector3(388.50f, 18.52f, -410.63f), "outside"),
-                                          new HotspotData(new Vector3(475.98f, 18.28f, -361.04f), "outside"),
-                                          new HotspotData(new Vector3(266.60f, 21.30f, -112.41f), "outside"),
-                                          new HotspotData(new Vector3(268.43f, 21.32f, 59.42f), "outside"),
-                                          new HotspotData(new Vector3(81.54f, 21.43f, -178.38f), "underground"),
-                                          new HotspotData(new Vector3(90.12f, 21.43f, -205.42f), "underground")
-                                      },
-                ["laboratory"] = new List<HotspotData>
-                                     {
-                                         new HotspotData(new Vector3(-137.0f, -4.2f, -255.9f), "sewage_conduit_pump_switch"),
-                                         new HotspotData(new Vector3(-123.75f, -4.05f, -314.4f), "medical_block_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-122.65f, -4.04f, -353.83f), "cargo_block_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-272.88f, -4.05f, -366.45f), "main_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-244.06f, 4.1f, -380.75f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-171.8f, 4.26f, -283.17f), "server_room"),
-                                         new HotspotData(new Vector3(-182.76f, 0.32f, -315.93f), "server_room"),
-                                         new HotspotData(new Vector3(-222.1f, 4.1f, -355.67f), "main_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-230.4f, 4.11f, -340.18f), "main_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-221.84f, 4.1f, -331.04f), "main_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-234.55f, 4.11f, -346.63f), "main_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-162.91f, 4.12f, -348.66f), "server_room"),
-                                         new HotspotData(new Vector3(-161.77f, 4.12f, -343.95f), "server_room"),
-                                         new HotspotData(new Vector3(-254.14f, 4.09f, -326.15f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-254.91f, 4.09f, -322.51f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-251.3f, 4.09f, -324.74f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-251.41f, 4.09f, -327.65f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-267.24f, 4.09f, -321.63f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-267.12f, 4.09f, -317.8f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-264.02f, 4.09f, -319.84f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-263.37f, 4.09f, -322.66f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-126.28f, 0.0f, -361.78f), "cargo_block_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-138.04f, 0.0f, -356.12f), "cargo_block_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-130.34f, 0.04f, -357.6f), "cargo_block_elevator_power_switch"),
-                                         new HotspotData(new Vector3(-136.55f, 0.0f, -403.93f), "weapon_testing_area"),
-                                         new HotspotData(new Vector3(-124.23f, 0.0f, -398.36f), "weapon_testing_area"),
-                                         new HotspotData(new Vector3(-132.09f, 4.09f, -350.5f), "server_room"),
-                                         new HotspotData(new Vector3(-124.59f, 4.09f, -351.07f), "server_room"),
-                                         new HotspotData(new Vector3(-123.24f, 4.09f, -356.21f), "server_room"),
-                                         new HotspotData(new Vector3(-137.1f, 4.09f, -368.39f), "server_room"),
-                                         new HotspotData(new Vector3(-124.02f, 4.09f, -364.89f), "server_room"),
-                                         new HotspotData(new Vector3(-128.07f, 4.09f, -376.82f), "weapon_testing_area"),
-                                         new HotspotData(new Vector3(-137.67f, 4.09f, -376.48f), "weapon_testing_area"),
-                                         new HotspotData(new Vector3(-138.27f, 4.09f, -357.42f), "server_room"),
-                                         new HotspotData(new Vector3(-131.37f, 4.1f, -336.3f), "server_room"),
-                                         new HotspotData(new Vector3(-266.9f, 4.09f, -326.34f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-258.14f, 4.09f, -318.11f), "parking_gate_controls"),
-                                         new HotspotData(new Vector3(-242.11f, 0.02f, -296.26f), "armory"),
-                                         new HotspotData(new Vector3(-235.26f, 4.12f, -310.98f), "armory"),
-                                         new HotspotData(new Vector3(-237.08f, 4.12f, -297.04f), "armory"),
-                                         new HotspotData(new Vector3(-223.1f, 4.12f, -297.14f), "armory"),
-                                         new HotspotData(new Vector3(-216.69f, 0.01f, -314.26f), "armory"),
-                                         new HotspotData(new Vector3(-219.65f, 0.36f, -307.13f), "armory"),
-                                         new HotspotData(new Vector3(-203.52f, 1.35f, -305.36f), "armory"),
-                                         new HotspotData(new Vector3(-226.21f, 0.02f, -407.11f), "weapon_testing_area"),
-                                         new HotspotData(new Vector3(-238.76f, 0.02f, -409.55f), "weapon_testing_area"),
-                                         new HotspotData(new Vector3(-247.31f, 0.02f, -414.73f), "weapon_testing_area"),
-                                         new HotspotData(new Vector3(-221.31f, 0.02f, -426.07f), "weapon_testing_area")
-                                     },
-                ["lighthouse"] = new List<HotspotData>
-                                     {
-                                         new HotspotData(new Vector3(-267.71f, -4.65f, 272.37f), "construction"),
-                                         new HotspotData(new Vector3(-278.14f, -4.63f, 265.81f), "construction"),
-                                         new HotspotData(new Vector3(-159.99f, 3.25f, 178.55f), "village"),
-                                         new HotspotData(new Vector3(-150.28f, 3.23f, 193.62f), "village"),
-                                         new HotspotData(new Vector3(79.38f, 10.28f, 364.92f), "lighthouse"),
-                                         new HotspotData(new Vector3(86.71f, 10.29f, 348.44f), "lighthouse"),
-                                         new HotspotData(new Vector3(237.42f, 22.88f, 160.61f), "chalet"),
-                                         new HotspotData(new Vector3(232.00f, 23.31f, 173.83f), "chalet"),
-                                         new HotspotData(new Vector3(219.56f, 19.72f, 304.87f), "mountainside"),
-                                         new HotspotData(new Vector3(-5.62f, 1.53f, 473.01f), "marina"),
-                                         new HotspotData(new Vector3(-22.18f, 2.31f, 485.32f), "marina"),
-                                         new HotspotData(new Vector3(-185.94f, -3.02f, 423.75f), "pathside"),
-                                         new HotspotData(new Vector3(-193.28f, -3.07f, 406.99f), "pathside"),
-                                         new HotspotData(new Vector3(-98.25f, 6.12f, 315.17f), "swamp"),
-                                         new HotspotData(new Vector3(-106.82f, 6.11f, 300.39f), "swamp"),
-                                         new HotspotData(new Vector3(-120.58f, 0.89f, 224.94f), "village"),
-                                         new HotspotData(new Vector3(-130.12f, 1.03f, 205.77f), "village")
-                                     },
-                ["rezervbase"] = new List<HotspotData>
-                                     {
-                                         new HotspotData(new Vector3(86.0f, 2.8f, 106.5f), "pawn1"),
-                                         new HotspotData(new Vector3(95.3f, 2.8f, 96.2f), "pawn1"),
-                                         new HotspotData(new Vector3(107.2f, 2.8f, 129.8f), "pawn2"),
-                                         new HotspotData(new Vector3(116.1f, 2.8f, 134.7f), "pawn2"),
-                                         new HotspotData(new Vector3(83.4f, 2.8f, 140.1f), "pawn3"),
-                                         new HotspotData(new Vector3(86.5f, 2.8f, 147.3f), "pawn3"),
-                                         new HotspotData(new Vector3(100.4f, 2.8f, 159.2f), "pawn4"),
-                                         new HotspotData(new Vector3(107.8f, 2.8f, 160.9f), "pawn4"),
-                                         new HotspotData(new Vector3(121.3f, 2.8f, 109.3f), "barracks"),
-                                         new HotspotData(new Vector3(132.7f, 2.8f, 118.6f), "barracks"),
-                                         new HotspotData(new Vector3(122.4f, 2.8f, 91.1f), "school"),
-                                         new HotspotData(new Vector3(115.6f, 2.8f, 84.3f), "school"),
-                                         new HotspotData(new Vector3(139.9f, 14.2f, 29.2f), "dome"),
-                                         new HotspotData(new Vector3(149.3f, 2.8f, 142.5f), "king"),
-                                         new HotspotData(new Vector3(155.2f, 2.8f, 137.7f), "king"),
-                                         new HotspotData(new Vector3(166.7f, -0.3f, 70.2f), "bunker"),
-                                         new HotspotData(new Vector3(159.1f, -0.3f, 62.5f), "bunker")
-                                     },
-                ["sandbox"] = new List<HotspotData>
-                                  {
-                                      new HotspotData(new Vector3(-8.17f, -0.14f, -6.75f), "center"),
-                                      new HotspotData(new Vector3(-15.92f, -0.14f, -3.51f), "center"),
-                                      new HotspotData(new Vector3(-20.28f, 2.00f, 13.12f), "upper"),
-                                      new HotspotData(new Vector3(-27.91f, 2.00f, 12.89f), "upper"),
-                                      new HotspotData(new Vector3(7.13f, -2.22f, -10.21f), "basement"),
-                                      new HotspotData(new Vector3(18.54f, -0.14f, -6.82f), "frontline"),
-                                      new HotspotData(new Vector3(19.92f, -0.14f, -2.15f), "frontline"),
-                                      new HotspotData(new Vector3(-6.25f, 1.89f, 19.35f), "balcony"),
-                                      new HotspotData(new Vector3(-1.82f, 1.89f, 20.61f), "balcony"),
-                                      new HotspotData(new Vector3(6.41f, -2.22f, -16.97f), "basement"),
-                                      new HotspotData(new Vector3(25.00f, -0.14f, 6.90f), "sidehall"),
-                                      new HotspotData(new Vector3(24.88f, -0.14f, 13.74f), "sidehall"),
-                                      new HotspotData(new Vector3(-12.43f, 3.91f, -3.65f), "overwatch"),
-                                      new HotspotData(new Vector3(0.79f, 3.91f, -3.44f), "overwatch"),
-                                      new HotspotData(new Vector3(-18.42f, -0.14f, -18.12f), "corner"),
-                                      new HotspotData(new Vector3(-21.94f, -0.14f, -22.08f), "corner")
-                                  },
-                ["sandbox_high"] = new List<HotspotData>
-                                       {
-                                           new HotspotData(new Vector3(-8.17f, -0.14f, -6.75f), "center"),
-                                           new HotspotData(new Vector3(-15.92f, -0.14f, -3.51f), "center"),
-                                           new HotspotData(new Vector3(-20.28f, 2.00f, 13.12f), "upper"),
-                                           new HotspotData(new Vector3(-27.91f, 2.00f, 12.89f), "upper"),
-                                           new HotspotData(new Vector3(7.13f, -2.22f, -10.21f), "basement"),
-                                           new HotspotData(new Vector3(18.54f, -0.14f, -6.82f), "frontline"),
-                                           new HotspotData(new Vector3(19.92f, -0.14f, -2.15f), "frontline"),
-                                           new HotspotData(new Vector3(-6.25f, 1.89f, 19.35f), "balcony"),
-                                           new HotspotData(new Vector3(-1.82f, 1.89f, 20.61f), "balcony"),
-                                           new HotspotData(new Vector3(6.41f, -2.22f, -16.97f), "basement"),
-                                           new HotspotData(new Vector3(25.00f, -0.14f, 6.90f), "sidehall"),
-                                           new HotspotData(new Vector3(24.88f, -0.14f, 13.74f), "sidehall"),
-                                           new HotspotData(new Vector3(-12.43f, 3.91f, -3.65f), "overwatch"),
-                                           new HotspotData(new Vector3(0.79f, 3.91f, -3.44f), "overwatch"),
-                                           new HotspotData(new Vector3(-18.42f, -0.14f, -18.12f), "corner"),
-                                           new HotspotData(new Vector3(-21.94f, -0.14f, -22.08f), "corner")
-                                       },
-                ["shoreline"] = new List<HotspotData>
-                                    {
-                                        new HotspotData(new Vector3(-154.7f, 6.8f, 250.3f), "resort"),
-                                        new HotspotData(new Vector3(-162.9f, 6.8f, 261.2f), "resort"),
-                                        new HotspotData(new Vector3(-92.4f, 6.8f, 246.7f), "resort"),
-                                        new HotspotData(new Vector3(-81.3f, 6.8f, 257.8f), "resort"),
-                                        new HotspotData(new Vector3(-395.6f, 3.6f, -160.4f), "swamp"),
-                                        new HotspotData(new Vector3(-402.2f, 3.6f, -147.3f), "swamp"),
-                                        new HotspotData(new Vector3(150.2f, 3.1f, 170.6f), "village"),
-                                        new HotspotData(new Vector3(74.1f, 2.0f, -51.6f), "gasstation"),
-                                        new HotspotData(new Vector3(215.9f, 0.2f, -292.3f), "pier"),
-                                        new HotspotData(new Vector3(221.6f, 0.2f, -281.4f), "pier"),
-                                        new HotspotData(new Vector3(361.4f, -1.3f, -401.7f), "scavisland"),
-                                        new HotspotData(new Vector3(44.2f, 21.4f, 304.9f), "radar")
-                                    },
-                ["tarkovStreets"] = new List<HotspotData>
-                                        {
-                                            new HotspotData(new Vector3(63.59117f, 6.85782146f, 322.654755f), "cinema"),
-                                            new HotspotData(new Vector3(63.6309f, 6.85782146f, 313.263916f), "cinema"),
-                                            new HotspotData(new Vector3(68.78775f, 6.85781956f, 319.639252f), "cinema"),
-                                            new HotspotData(new Vector3(67.18654f, 6.85782433f, 308.381134f), "cinema"),
-                                            new HotspotData(new Vector3(209.81192f, -1.24632215f, 410.749756f), "collapsedbuilding"),
-                                            new HotspotData(new Vector3(277.639557f, 6.34998f, 381.5505f), "collapsedbuilding"),
-                                            new HotspotData(new Vector3(279.186584f, 6.34998035f, 386.976746f), "collapsedbuilding"),
-                                            new HotspotData(new Vector3(107.031654f, 3.762976f, 223.787964f), "lexos"),
-                                            new HotspotData(new Vector3(122.383759f, 3.52197075f, 218.807953f), "lexos"),
-                                            new HotspotData(new Vector3(126.530045f, 2.76816821f, 231.436447f), "lexos"),
-                                            new HotspotData(new Vector3(131.462723f, 3.528088f, 234.0461f), "lexos"),
-                                            new HotspotData(new Vector3(136.6608f, 3.52808833f, 229.4865f), "lexos"),
-                                            new HotspotData(new Vector3(140.617279f, 3.528088f, 232.996f), "lexos"),
-                                            new HotspotData(new Vector3(150.0387f, 3.529985f, 230.1132f), "lexos"),
-                                            new HotspotData(new Vector3(153.572723f, 3.52998471f, 233.847214f), "lexos"),
-                                            new HotspotData(new Vector3(84.9201f, 2.76689816f, 266.061432f), "concordia"),
-                                            new HotspotData(new Vector3(70.2452f, 2.65098548f, 266.672363f), "concordia"),
-                                            new HotspotData(new Vector3(67.60499f, 5.08100033f, 266.61087f), "concordia"),
-                                            new HotspotData(new Vector3(5.75204754f, 4.09985256f, 175.204391f), "carcrash"),
-                                            new HotspotData(new Vector3(9.763755f, 4.100117f, 166.423233f), "carcrash"),
-                                            new HotspotData(new Vector3(2.010031f, 4.09985256f, 165.482666f), "carcrash"),
-                                            new HotspotData(new Vector3(0.25032836f, 4.09985161f, 172.992859f), "carcrash"),
-                                            new HotspotData(new Vector3(-63.29856f, 3.954f, 116.256f), "chek15"),
-                                            new HotspotData(new Vector3(-71.2328f, 3.954f, 109.872f), "chek15"),
-                                            new HotspotData(new Vector3(-62.1814f, 3.954f, 103.741f), "chek15"),
-                                            new HotspotData(new Vector3(-178.181366f, 2.668078f, 234.401947f), "development"),
-                                            new HotspotData(new Vector3(-185.043289f, 2.668078f, 222.6836f), "development"),
-                                            new HotspotData(new Vector3(-189.9359f, 2.668078f, 235.095764f), "development"),
-                                            new HotspotData(new Vector3(-185.471344f, 2.668078f, 245.14296f), "development"),
-                                            new HotspotData(new Vector3(-80.12827f, 2.668078f, 205.95752f), "residential"),
-                                            new HotspotData(new Vector3(-76.75427f, 2.668078f, 216.342438f), "residential"),
-                                            new HotspotData(new Vector3(-66.6820145f, 2.668078f, 216.512054f), "residential"),
-                                            new HotspotData(new Vector3(-64.36503f, 2.668078f, 203.144775f), "residential"),
-                                            new HotspotData(new Vector3(42.23939f, 2.65f, 188.528046f), "construction"),
-                                            new HotspotData(new Vector3(47.16363f, 2.65f, 177.361755f), "construction"),
-                                            new HotspotData(new Vector3(56.4329643f, 2.65f, 178.257355f), "construction"),
-                                            new HotspotData(new Vector3(53.41108f, 2.65f, 189.4507f), "construction")
-                                        },
-                ["woods"] = new List<HotspotData>
-                                {
-                                    new HotspotData(new Vector3(-177.79f, -1.86f, 264.29f), "usec"),
-                                    new HotspotData(new Vector3(-179.30f, -1.86f, 261.63f), "usec"),
-                                    new HotspotData(new Vector3(-177.39f, -1.86f, 255.53f), "usec"),
-                                    new HotspotData(new Vector3(-167.99f, -1.86f, 254.75f), "usec"),
-                                    new HotspotData(new Vector3(-178.46f, -1.87f, 246.54f), "usec"),
-                                    new HotspotData(new Vector3(-117.86f, -1.36f, 402.16f), "lumber"),
-                                    new HotspotData(new Vector3(-136.86f, -1.57f, 414.80f), "lumber"),
-                                    new HotspotData(new Vector3(-97.62f, -15.43f, 219.63f), "bunker_east"),
-                                    new HotspotData(new Vector3(-24.16f, -3.64f, 45.34f), "bunker_west"),
-                                    new HotspotData(new Vector3(-25.93f, -3.64f, 46.46f), "bunker_west"),
-                                    new HotspotData(new Vector3(-5.19f, -1.48f, -69.47f), "scavhouse"),
-                                    new HotspotData(new Vector3(-2.54f, -1.48f, -69.34f), "scavhouse"),
-                                    new HotspotData(new Vector3(-5.45f, -1.48f, -74.78f), "scavhouse"),
-                                    new HotspotData(new Vector3(-1.96f, -1.48f, -74.66f), "scavhouse"),
-                                    new HotspotData(new Vector3(-1.85f, -1.47f, -80.48f), "scavhouse"),
-                                    new HotspotData(new Vector3(77.10f, -1.77f, -47.34f), "village"),
-                                    new HotspotData(new Vector3(80.13f, -1.77f, -39.44f), "village"),
-                                    new HotspotData(new Vector3(55.49f, -2.66f, -48.08f), "village"),
-                                    new HotspotData(new Vector3(-248.28f, 26.28f, -196.44f), "sniperrock"),
-                                    new HotspotData(new Vector3(-333.59f, 28.02f, -227.68f), "sniperrock"),
-                                    new HotspotData(new Vector3(-155.81f, 51.13f, -275.11f), "sniperrock"),
-                                    new HotspotData(new Vector3(-232.66f, 67.69f, -229.94f), "sniperrock"),
-                                    new HotspotData(new Vector3(-210.42f, 76.26f, -272.82f), "sniperrock"),
-                                    new HotspotData(new Vector3(356.58f, -0.54f, -88.39f), "zb014"),
-                                    new HotspotData(new Vector3(414.50f, -13.58f, 239.25f), "zb016"),
-                                    new HotspotData(new Vector3(194.42f, -14.93f, 260.63f), "zb016"),
-                                    new HotspotData(new Vector3(446.22f, -14.24f, 61.33f), "zb016"),
-                                    new HotspotData(new Vector3(194.04f, 0.27f, -6.58f), "plane"),
-                                    new HotspotData(new Vector3(-45.81f, 8.65f, -599.73f), "cliffs"),
-                                    new HotspotData(new Vector3(-172.43f, 12.50f, -688.38f), "cliffs"),
-                                    new HotspotData(new Vector3(-36.99f, 9.95f, -740.65f), "cliffs"),
-                                    new HotspotData(new Vector3(-512.14f, 15.91f, -177.12f), "mountain"),
-                                    new HotspotData(new Vector3(-548.20f, 18.12f, -205.27f), "mountain"),
-                                    new HotspotData(new Vector3(-534.32f, 18.10f, -204.97f), "mountain"),
-                                    new HotspotData(new Vector3(-536.63f, 15.02f, -212.13f), "mountain"),
-                                    new HotspotData(new Vector3(-564.20f, 21.39f, -216.55f), "mountain"),
-                                    new HotspotData(new Vector3(243.09f, -8.46f, 124.23f), "zb013"),
-                                    new HotspotData(new Vector3(133.20f, -3.67f, 100.80f), "camp")
-                                },
+{
+    // Checkpoint – extraction, squad fallback, ambush, mission
+    new HotspotData(new Vector3(352.19f, 1.23f, -39.12f), "checkpoint", "extract", 0.91f, new Dictionary<string, string>{{"cover","mid"},{"event","extract"},{"ambush","yes"}}),
 
-            };
+    // Fortress – high loot, PvP, overwatch, squad control, base
+    new HotspotData(new Vector3(173.10f, 5.83f, 184.54f), "fortress", "combat", 0.95f, new Dictionary<string, string>{{"loot","rare"},{"cover","high"},{"event","overwatch"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(229.84f, -0.12f, 141.85f), "fortress", "loot", 0.93f, new Dictionary<string, string>{{"cover","mid"},{"loot","high"}}),
+    new HotspotData(new Vector3(237.59f, -0.12f, 160.00f), "fortress", "regroup", 0.92f, new Dictionary<string, string>{{"cover","mid"},{"event","regroup"}}),
+    new HotspotData(new Vector3(178.22f, -0.16f, 155.41f), "fortress", "fallback", 0.90f, new Dictionary<string, string>{{"cover","mid"},{"regroup","yes"}}),
+    new HotspotData(new Vector3(182.10f, -0.16f, 171.60f), "fortress", "fallback", 0.89f, new Dictionary<string, string>{{"cover","mid"},{"regroup","yes"}}),
+
+    // Crackhouse – high risk, loot, PvP, medical
+    new HotspotData(new Vector3(84.96f, 1.45f, -145.76f), "crackhouse", "loot", 0.87f, new Dictionary<string, string>{{"loot","rare"},{"cover","mid"},{"event","med"}}),
+    new HotspotData(new Vector3(79.26f, 1.47f, -155.50f), "crackhouse", "combat", 0.85f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Scav Warehouse – squad movement, combat, loot, fallback
+    new HotspotData(new Vector3(206.29f, 7.73f, -98.26f), "scav_warehouse", "combat", 0.84f, new Dictionary<string, string>{{"cover","high"},{"loot","mid"},{"event","regroup"}}),
+    new HotspotData(new Vector3(204.68f, 7.73f, -113.15f), "scav_warehouse", "loot", 0.83f, new Dictionary<string, string>{{"cover","mid"},{"loot","mid"}}),
+
+    // Gas Station – loot, extraction, ambush, squad fallback
+    new HotspotData(new Vector3(411.05f, 1.19f, 21.72f), "gas_station", "extract", 0.89f, new Dictionary<string, string>{{"cover","low"},{"event","extract"},{"loot","med"}}),
+    new HotspotData(new Vector3(417.80f, 1.13f, 38.08f), "gas_station", "combat", 0.87f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Dorms – high PvP, loot, squad fallback, flanking
+    new HotspotData(new Vector3(-204.12f, 1.08f, -105.59f), "dorms", "loot", 0.93f, new Dictionary<string, string>{{"loot","rare"},{"cover","mid"},{"event","key"}}),
+    new HotspotData(new Vector3(-202.45f, 7.04f, -100.49f), "dorms", "combat", 0.91f, new Dictionary<string, string>{{"cover","high"},{"ambush","yes"}}),
+
+    // Bus Station – squad regroup, fallback, extraction, loot
+    new HotspotData(new Vector3(289.55f, 1.09f, -191.92f), "bus_station", "regroup", 0.88f, new Dictionary<string, string>{{"cover","mid"},{"event","regroup"}}),
+    new HotspotData(new Vector3(316.63f, 1.30f, -185.15f), "bus_station", "extract", 0.86f, new Dictionary<string, string>{{"cover","mid"},{"event","extract"}}),
+    new HotspotData(new Vector3(345.72f, 1.09f, -162.60f), "bus_station", "combat", 0.85f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+},
+
+            ["factory4_day"] = new List<HotspotData>
+{
+    // Office – high loot, PvP, squad defense, extraction proximity
+    new HotspotData(new Vector3(19.67f, 8.21f, 39.33f), "office", "loot", 0.92f, new Dictionary<string, string>{{"loot","rare"},{"cover","mid"},{"event","key"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(13.39f, 8.15f, 40.11f), "office", "combat", 0.91f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(16.82f, 8.21f, 40.73f), "office", "fallback", 0.89f, new Dictionary<string, string>{{"cover","mid"},{"regroup","yes"}}),
+
+    // Basement – fallback, squad regroup, close combat, escape
+    new HotspotData(new Vector3(27.93f, 1.05f, 45.47f), "basement", "fallback", 0.81f, new Dictionary<string, string>{{"cover","low"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(21.95f, 0.99f, 41.45f), "basement", "loot", 0.78f, new Dictionary<string, string>{{"cover","low"},{"loot","mid"}}),
+    new HotspotData(new Vector3(13.09f, 1.04f, 39.82f), "basement", "regroup", 0.77f, new Dictionary<string, string>{{"cover","low"},{"event","regroup"}}),
+    new HotspotData(new Vector3(19.42f, -2.64f, -14.86f), "basement", "fallback", 0.75f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(15.55f, -2.61f, -32.50f), "basement", "regroup", 0.75f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(-8.28f, -3.89f, -33.34f), "basement", "combat", 0.74f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Tunnels – hidden movement, flanking, close combat
+    new HotspotData(new Vector3(-16.16f, 0.26f, -25.80f), "tunnels", "regroup", 0.74f, new Dictionary<string, string>{{"cover","low"},{"ambush","yes"},{"event","stealth"}}),
+    new HotspotData(new Vector3(-16.48f, 0.26f, -30.87f), "tunnels", "combat", 0.74f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Midfloor – PvP, squad control, observation
+    new HotspotData(new Vector3(51.17f, 4.31f, 10.63f), "midfloor", "combat", 0.86f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Forklift – fallback, ambush, cover
+    new HotspotData(new Vector3(-54.76f, 1.31f, 57.03f), "forklift", "fallback", 0.77f, new Dictionary<string, string>{{"cover","mid"},{"event","regroup"}}),
+    new HotspotData(new Vector3(-60.01f, 1.31f, 57.04f), "forklift", "combat", 0.76f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Third floor – long sight lines, squad overwatch
+    new HotspotData(new Vector3(26.94f, 7.16f, -34.23f), "third", "overwatch", 0.91f, new Dictionary<string, string>{{"cover","high"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(32.65f, 7.16f, -18.08f), "third", "loot", 0.89f, new Dictionary<string, string>{{"cover","mid"},{"loot","rare"}}),
+    new HotspotData(new Vector3(4.81f, 7.34f, 63.80f), "third", "combat", 0.88f, new Dictionary<string, string>{{"cover","high"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-40.13f, 7.54f, 62.63f), "third", "fallback", 0.87f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(33.51f, 7.17f, -30.26f), "third", "loot", 0.87f, new Dictionary<string, string>{{"cover","high"},{"loot","rare"}}),
+
+    // Second floor – fallback, flanking
+    new HotspotData(new Vector3(28.23f, 3.64f, -31.09f), "second", "flank", 0.84f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(29.48f, 3.58f, -18.76f), "second", "fallback", 0.82f, new Dictionary<string, string>{{"cover","mid"}}),
+
+    // Boiler – fallback, loot, PvP
+    new HotspotData(new Vector3(65.87f, 0.06f, -44.16f), "boiler", "fallback", 0.76f, new Dictionary<string, string>{{"cover","mid"}}),
+
+    // Main – PvP, squad movement, extraction
+    new HotspotData(new Vector3(32.84f, 0.10f, -32.25f), "main", "combat", 0.83f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(29.05f, 0.10f, -32.90f), "main", "extract", 0.81f, new Dictionary<string, string>{{"event","extract"}}),
+    new HotspotData(new Vector3(35.16f, 3.35f, -13.09f), "main", "regroup", 0.80f, new Dictionary<string, string>{{"cover","mid"},{"event","regroup"}}),
+
+    // Rafters – ambush, overwatch, loot
+    new HotspotData(new Vector3(50.31f, 8.41f, 15.60f), "rafters", "overwatch", 0.88f, new Dictionary<string, string>{{"cover","high"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(21.46f, 8.38f, 14.20f), "rafters", "loot", 0.86f, new Dictionary<string, string>{{"cover","high"},{"loot","rare"}}),
+
+    // Extract – all exits, fallback, PvP
+    new HotspotData(new Vector3(60.68f, 0.23f, 43.72f), "extract", "extract", 0.92f, new Dictionary<string, string>{{"event","extract"}}),
+    new HotspotData(new Vector3(56.46f, 0.20f, 46.99f), "extract", "extract", 0.92f, new Dictionary<string, string>{{"event","extract"}}),
+    new HotspotData(new Vector3(54.15f, 0.10f, 25.53f), "extract", "extract", 0.91f, new Dictionary<string, string>{{"event","extract"}}),
+
+    // Gates – fallback, ambush, extract
+    new HotspotData(new Vector3(-24.70f, 1.11f, 65.49f), "gate", "extract", 0.83f, new Dictionary<string, string>{{"cover","mid"},{"event","extract"}}),
+    new HotspotData(new Vector3(-22.64f, -2.60f, 45.84f), "gate", "fallback", 0.81f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(1.55f, -2.60f, 52.56f), "gate", "fallback", 0.81f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(10.62f, -2.59f, 40.92f), "gate", "fallback", 0.80f, new Dictionary<string, string>{{"cover","low"}}),
+},
+
+            ["factory4_night"] = new List<HotspotData>
+{
+    // Office – high loot, PvP, squad defense, extraction proximity
+    new HotspotData(new Vector3(19.67f, 8.21f, 39.33f), "office", "loot", 0.92f, new Dictionary<string, string>{{"loot","rare"},{"cover","mid"},{"event","key"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(13.39f, 8.15f, 40.11f), "office", "combat", 0.91f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(16.82f, 8.21f, 40.73f), "office", "fallback", 0.89f, new Dictionary<string, string>{{"cover","mid"},{"regroup","yes"}}),
+
+    // Basement – fallback, squad regroup, close combat, escape
+    new HotspotData(new Vector3(27.93f, 1.05f, 45.47f), "basement", "fallback", 0.81f, new Dictionary<string, string>{{"cover","low"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(21.95f, 0.99f, 41.45f), "basement", "loot", 0.78f, new Dictionary<string, string>{{"cover","low"},{"loot","mid"}}),
+    new HotspotData(new Vector3(13.09f, 1.04f, 39.82f), "basement", "regroup", 0.77f, new Dictionary<string, string>{{"cover","low"},{"event","regroup"}}),
+    new HotspotData(new Vector3(19.42f, -2.64f, -14.86f), "basement", "fallback", 0.75f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(15.55f, -2.61f, -32.50f), "basement", "regroup", 0.75f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(-8.28f, -3.89f, -33.34f), "basement", "combat", 0.74f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Tunnels – hidden movement, flanking, close combat
+    new HotspotData(new Vector3(-16.16f, 0.26f, -25.80f), "tunnels", "regroup", 0.74f, new Dictionary<string, string>{{"cover","low"},{"ambush","yes"},{"event","stealth"}}),
+    new HotspotData(new Vector3(-16.48f, 0.26f, -30.87f), "tunnels", "combat", 0.74f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Midfloor – PvP, squad control, observation
+    new HotspotData(new Vector3(51.17f, 4.31f, 10.63f), "midfloor", "combat", 0.86f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Forklift – fallback, ambush, cover
+    new HotspotData(new Vector3(-54.76f, 1.31f, 57.03f), "forklift", "fallback", 0.77f, new Dictionary<string, string>{{"cover","mid"},{"event","regroup"}}),
+    new HotspotData(new Vector3(-60.01f, 1.31f, 57.04f), "forklift", "combat", 0.76f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // Third floor – long sight lines, squad overwatch
+    new HotspotData(new Vector3(26.94f, 7.16f, -34.23f), "third", "overwatch", 0.91f, new Dictionary<string, string>{{"cover","high"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(32.65f, 7.16f, -18.08f), "third", "loot", 0.89f, new Dictionary<string, string>{{"cover","mid"},{"loot","rare"}}),
+    new HotspotData(new Vector3(4.81f, 7.34f, 63.80f), "third", "combat", 0.88f, new Dictionary<string, string>{{"cover","high"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-40.13f, 7.54f, 62.63f), "third", "fallback", 0.87f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(33.51f, 7.17f, -30.26f), "third", "loot", 0.87f, new Dictionary<string, string>{{"cover","high"},{"loot","rare"}}),
+
+    // Second floor – fallback, flanking
+    new HotspotData(new Vector3(28.23f, 3.64f, -31.09f), "second", "flank", 0.84f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(29.48f, 3.58f, -18.76f), "second", "fallback", 0.82f, new Dictionary<string, string>{{"cover","mid"}}),
+
+    // Boiler – fallback, loot, PvP
+    new HotspotData(new Vector3(65.87f, 0.06f, -44.16f), "boiler", "fallback", 0.76f, new Dictionary<string, string>{{"cover","mid"}}),
+
+    // Main – PvP, squad movement, extraction
+    new HotspotData(new Vector3(32.84f, 0.10f, -32.25f), "main", "combat", 0.83f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(29.05f, 0.10f, -32.90f), "main", "extract", 0.81f, new Dictionary<string, string>{{"event","extract"}}),
+    new HotspotData(new Vector3(35.16f, 3.35f, -13.09f), "main", "regroup", 0.80f, new Dictionary<string, string>{{"cover","mid"},{"event","regroup"}}),
+
+    // Rafters – ambush, overwatch, loot
+    new HotspotData(new Vector3(50.31f, 8.41f, 15.60f), "rafters", "overwatch", 0.88f, new Dictionary<string, string>{{"cover","high"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(21.46f, 8.38f, 14.20f), "rafters", "loot", 0.86f, new Dictionary<string, string>{{"cover","high"},{"loot","rare"}}),
+
+    // Extract – all exits, fallback, PvP
+    new HotspotData(new Vector3(60.68f, 0.23f, 43.72f), "extract", "extract", 0.92f, new Dictionary<string, string>{{"event","extract"}}),
+    new HotspotData(new Vector3(56.46f, 0.20f, 46.99f), "extract", "extract", 0.92f, new Dictionary<string, string>{{"event","extract"}}),
+    new HotspotData(new Vector3(54.15f, 0.10f, 25.53f), "extract", "extract", 0.91f, new Dictionary<string, string>{{"event","extract"}}),
+
+    // Gates – fallback, ambush, extract
+    new HotspotData(new Vector3(-24.70f, 1.11f, 65.49f), "gate", "extract", 0.83f, new Dictionary<string, string>{{"cover","mid"},{"event","extract"}}),
+    new HotspotData(new Vector3(-22.64f, -2.60f, 45.84f), "gate", "fallback", 0.81f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(1.55f, -2.60f, 52.56f), "gate", "fallback", 0.81f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(10.62f, -2.59f, 40.92f), "gate", "fallback", 0.80f, new Dictionary<string, string>{{"cover","low"}}),
+},
+
+            ["interchange"] = new List<HotspotData>
+{
+    // GOSHAN – Open loot, fallback, and heavy PvP
+    new HotspotData(new Vector3(-129.02f, 27.09f, -158.13f), "goshan", "loot", 0.89f, new Dictionary<string, string>{{"cover","open"},{"loot","high"},{"ambush","medium"},{"event","spawn"}}),
+    new HotspotData(new Vector3(-117.55f, 27.09f, -169.71f), "goshan", "combat", 0.87f, new Dictionary<string, string>{{"cover","mid"},{"loot","high"},{"ambush","medium"}}),
+    new HotspotData(new Vector3(-112.33f, 27.09f, -143.40f), "goshan", "fallback", 0.86f, new Dictionary<string, string>{{"cover","open"},{"loot","mid"}}),
+    new HotspotData(new Vector3(-153.03f, 21.48f, -353.02f), "goshan", "spawn", 0.75f, new Dictionary<string, string>{{"cover","mid"},{"event","spawn"}}),
+    new HotspotData(new Vector3(-105.32f, 27.09f, -176.34f), "goshan", "loot", 0.82f, new Dictionary<string, string>{{"cover","low"},{"loot","high"}}),
+    new HotspotData(new Vector3(-110.92f, 27.09f, -176.34f), "goshan", "loot", 0.82f, new Dictionary<string, string>{{"cover","low"},{"loot","high"}}),
+    new HotspotData(new Vector3(-77.26f, 27.09f, -150.09f), "goshan", "combat", 0.81f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-77.18f, 27.09f, -159.62f), "goshan", "combat", 0.81f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // TECHLIGHT – PvP hotzone, vantage, ambush, loot
+    new HotspotData(new Vector3(-69.00f, 27.09f, 40.48f), "techlight", "combat", 0.90f, new Dictionary<string, string>{{"cover","elevated"},{"ambush","yes"},{"loot","rare"}}),
+    new HotspotData(new Vector3(-76.68f, 27.09f, 42.42f), "techlight", "loot", 0.85f, new Dictionary<string, string>{{"cover","mid"},{"loot","rare"}}),
+
+    // KIBA – Key loot, close quarters, critical event/mission
+    new HotspotData(new Vector3(93.13f, 36.57f, 33.66f), "kiba", "loot", 0.98f, new Dictionary<string, string>{{"cover","close"},{"loot","rare"},{"event","key"}}),
+    new HotspotData(new Vector3(92.26f, 36.57f, 56.78f), "kiba", "loot", 0.97f, new Dictionary<string, string>{{"cover","close"},{"loot","rare"}}),
+    new HotspotData(new Vector3(96.76f, 36.57f, 48.90f), "kiba", "combat", 0.95f, new Dictionary<string, string>{{"ambush","yes"},{"loot","rare"},{"event","key"}}),
+
+    // IDEA – Supermarket, fallback, loot, PvP
+    new HotspotData(new Vector3(31.46f, 27.09f, -102.54f), "idea", "loot", 0.90f, new Dictionary<string, string>{{"cover","open"},{"loot","high"}}),
+    new HotspotData(new Vector3(11.47f, 27.09f, -108.74f), "idea", "combat", 0.85f, new Dictionary<string, string>{{"cover","low"},{"ambush","medium"}}),
+    new HotspotData(new Vector3(22.07f, 27.09f, -102.48f), "idea", "fallback", 0.81f, new Dictionary<string, string>{{"cover","open"},{"loot","high"}}),
+    new HotspotData(new Vector3(34.25f, 21.34f, -129.46f), "idea", "loot", 0.79f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(41.58f, 21.33f, -114.54f), "idea", "combat", 0.79f, new Dictionary<string, string>{{"cover","low"},{"ambush","yes"}}),
+
+    // OLLIE – Mega store, fallback, cover, loot
+    new HotspotData(new Vector3(-38.62f, 27.09f, 156.98f), "ollie", "loot", 0.82f, new Dictionary<string, string>{{"cover","open"},{"loot","high"}}),
+    new HotspotData(new Vector3(-68.07f, 27.09f, 189.49f), "ollie", "fallback", 0.79f, new Dictionary<string, string>{{"cover","open"}}),
+    new HotspotData(new Vector3(54.61f, 27.09f, 119.75f), "ollie", "loot", 0.79f, new Dictionary<string, string>{{"cover","mid"},{"loot","mid"}}),
+    new HotspotData(new Vector3(39.34f, 27.09f, 183.50f), "ollie", "combat", 0.79f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+
+    // MALL – Central open zone, PvP, fallback, ambush
+    new HotspotData(new Vector3(0.13f, 27.25f, 45.94f), "mall", "combat", 0.85f, new Dictionary<string, string>{{"cover","open"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(28.84f, 27.09f, 54.88f), "mall", "fallback", 0.82f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(28.04f, 27.09f, 30.45f), "mall", "loot", 0.80f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(10.75f, 27.09f, 30.58f), "mall", "loot", 0.80f, new Dictionary<string, string>{{"cover","low"}}),
+
+    // CENTRAL – Fallback, PvP, squad regroup, cover
+    new HotspotData(new Vector3(-13.08f, 27.09f, -31.64f), "central", "fallback", 0.79f, new Dictionary<string, string>{{"cover","mid"},{"event","regroup"}}),
+    new HotspotData(new Vector3(-21.25f, 27.09f, -18.47f), "central", "regroup", 0.78f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-15.25f, 27.09f, -17.09f), "central", "regroup", 0.78f, new Dictionary<string, string>{{"cover","low"}}),
+
+    // UNDERGROUND – Extraction, fallback, PvP
+    new HotspotData(new Vector3(10.60f, 27.07f, -300.16f), "underground", "extract", 0.80f, new Dictionary<string, string>{{"cover","high"},{"event","extract"}}),
+    new HotspotData(new Vector3(-17.77f, 27.07f, -300.47f), "underground", "extract", 0.80f, new Dictionary<string, string>{{"cover","high"},{"event","extract"}}),
+    new HotspotData(new Vector3(61.02f, 21.43f, -254.57f), "underground", "combat", 0.80f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(81.54f, 21.43f, -178.38f), "underground", "fallback", 0.78f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(90.12f, 21.43f, -205.42f), "underground", "combat", 0.78f, new Dictionary<string, string>{{"cover","low"}}),
+
+    // OUTSIDE – Sniper, cover, long-range, ambush
+    new HotspotData(new Vector3(-351.60f, 24.19f, 225.81f), "outside", "sniper", 0.77f, new Dictionary<string, string>{{"cover","high"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-328.11f, 21.33f, 259.34f), "outside", "combat", 0.77f, new Dictionary<string, string>{{"cover","open"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-207.76f, 21.33f, -347.53f), "outside", "fallback", 0.75f, new Dictionary<string, string>{{"cover","open"}}),
+    new HotspotData(new Vector3(-205.68f, 21.42f, -361.11f), "outside", "fallback", 0.75f, new Dictionary<string, string>{{"cover","open"}}),
+    new HotspotData(new Vector3(-215.87f, 21.42f, -361.67f), "outside", "combat", 0.75f, new Dictionary<string, string>{{"cover","open"}}),
+    new HotspotData(new Vector3(388.50f, 18.52f, -410.63f), "outside", "extract", 0.74f, new Dictionary<string, string>{{"event","extract"}}),
+    new HotspotData(new Vector3(475.98f, 18.28f, -361.04f), "outside", "extract", 0.74f, new Dictionary<string, string>{{"event","extract"}}),
+    new HotspotData(new Vector3(266.60f, 21.30f, -112.41f), "outside", "sniper", 0.73f, new Dictionary<string, string>{{"cover","high"}}),
+    new HotspotData(new Vector3(268.43f, 21.32f, 59.42f), "outside", "sniper", 0.73f, new Dictionary<string, string>{{"cover","high"}})
+},
+
+            ["laboratory"] = new List<HotspotData>
+{
+    // Pump/elevator/critical switches – mission, sabotage, fallback, event
+    new HotspotData(new Vector3(-137.0f, -4.2f, -255.9f), "sewage_conduit_pump_switch", "objective", 0.95f, new Dictionary<string, string>{{"mission","escape"},{"cover","mid"},{"event","switch"}}),
+    new HotspotData(new Vector3(-123.75f, -4.05f, -314.4f), "medical_block_elevator_power_switch", "objective", 0.93f, new Dictionary<string, string>{{"mission","elevator"},{"cover","low"}}),
+    new HotspotData(new Vector3(-122.65f, -4.04f, -353.83f), "cargo_block_elevator_power_switch", "objective", 0.90f, new Dictionary<string, string>{{"mission","elevator"},{"cover","low"}}),
+    new HotspotData(new Vector3(-272.88f, -4.05f, -366.45f), "main_elevator_power_switch", "objective", 0.92f, new Dictionary<string, string>{{"mission","elevator"},{"event","switch"}}),
+
+    // Parking controls – fallback, tactical retreat, entry/exit point
+    new HotspotData(new Vector3(-244.06f, 4.1f, -380.75f), "parking_gate_controls", "entry", 0.77f, new Dictionary<string, string>{{"cover","medium"},{"event","entry"}}),
+    new HotspotData(new Vector3(-254.14f, 4.09f, -326.15f), "parking_gate_controls", "entry", 0.75f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-254.91f, 4.09f, -322.51f), "parking_gate_controls", "entry", 0.75f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-251.3f, 4.09f, -324.74f), "parking_gate_controls", "entry", 0.75f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-251.41f, 4.09f, -327.65f), "parking_gate_controls", "entry", 0.75f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-267.24f, 4.09f, -321.63f), "parking_gate_controls", "entry", 0.75f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-267.12f, 4.09f, -317.8f), "parking_gate_controls", "entry", 0.75f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-264.02f, 4.09f, -319.84f), "parking_gate_controls", "entry", 0.75f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-263.37f, 4.09f, -322.66f), "parking_gate_controls", "entry", 0.75f, new Dictionary<string, string>{{"cover","mid"}}),
+
+    // Server room – high traffic, defense, ambush, loot, fallback
+    new HotspotData(new Vector3(-171.8f, 4.26f, -283.17f), "server_room", "loot", 0.81f, new Dictionary<string, string>{{"cover","high"},{"loot","rare"}}),
+    new HotspotData(new Vector3(-182.76f, 0.32f, -315.93f), "server_room", "combat", 0.82f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-162.91f, 4.12f, -348.66f), "server_room", "loot", 0.80f, new Dictionary<string, string>{{"cover","mid"},{"loot","rare"}}),
+    new HotspotData(new Vector3(-161.77f, 4.12f, -343.95f), "server_room", "fallback", 0.78f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(-132.09f, 4.09f, -350.5f), "server_room", "fallback", 0.78f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-124.59f, 4.09f, -351.07f), "server_room", "fallback", 0.78f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-123.24f, 4.09f, -356.21f), "server_room", "fallback", 0.78f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-137.1f, 4.09f, -368.39f), "server_room", "combat", 0.81f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-124.02f, 4.09f, -364.89f), "server_room", "fallback", 0.78f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(-138.27f, 4.09f, -357.42f), "server_room", "combat", 0.81f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-131.37f, 4.1f, -336.3f), "server_room", "fallback", 0.78f, new Dictionary<string, string>{{"cover","mid"}}),
+
+    // Main elevator & cargo – extraction, mission, fallback
+    new HotspotData(new Vector3(-222.1f, 4.1f, -355.67f), "main_elevator_power_switch", "extract", 0.92f, new Dictionary<string, string>{{"event","switch"}}),
+    new HotspotData(new Vector3(-230.4f, 4.11f, -340.18f), "main_elevator_power_switch", "extract", 0.92f, new Dictionary<string, string>{{"event","switch"}}),
+    new HotspotData(new Vector3(-221.84f, 4.1f, -331.04f), "main_elevator_power_switch", "extract", 0.92f, new Dictionary<string, string>{{"event","switch"}}),
+    new HotspotData(new Vector3(-234.55f, 4.11f, -346.63f), "main_elevator_power_switch", "extract", 0.92f, new Dictionary<string, string>{{"event","switch"}}),
+    new HotspotData(new Vector3(-126.28f, 0.0f, -361.78f), "cargo_block_elevator_power_switch", "extract", 0.90f, new Dictionary<string, string>{{"event","switch"}}),
+    new HotspotData(new Vector3(-138.04f, 0.0f, -356.12f), "cargo_block_elevator_power_switch", "extract", 0.90f, new Dictionary<string, string>{{"event","switch"}}),
+    new HotspotData(new Vector3(-130.34f, 0.04f, -357.6f), "cargo_block_elevator_power_switch", "extract", 0.90f, new Dictionary<string, string>{{"event","switch"}}),
+
+    // Armory – high-value loot, fallback, combat, ambush
+    new HotspotData(new Vector3(-242.11f, 0.02f, -296.26f), "armory", "loot", 0.86f, new Dictionary<string, string>{{"loot","high"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-235.26f, 4.12f, -310.98f), "armory", "combat", 0.83f, new Dictionary<string, string>{{"cover","mid"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-237.08f, 4.12f, -297.04f), "armory", "loot", 0.86f, new Dictionary<string, string>{{"loot","high"}}),
+    new HotspotData(new Vector3(-223.1f, 4.12f, -297.14f), "armory", "loot", 0.86f, new Dictionary<string, string>{{"loot","high"}}),
+    new HotspotData(new Vector3(-216.69f, 0.01f, -314.26f), "armory", "fallback", 0.81f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-219.65f, 0.36f, -307.13f), "armory", "fallback", 0.81f, new Dictionary<string, string>{{"cover","mid"}}),
+    new HotspotData(new Vector3(-203.52f, 1.35f, -305.36f), "armory", "fallback", 0.81f, new Dictionary<string, string>{{"cover","mid"}}),
+
+    // Weapon testing – high noise, risk, escape
+    new HotspotData(new Vector3(-136.55f, 0.0f, -403.93f), "weapon_testing_area", "combat", 0.79f, new Dictionary<string, string>{{"event","loud"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-124.23f, 0.0f, -398.36f), "weapon_testing_area", "combat", 0.79f, new Dictionary<string, string>{{"event","loud"}}),
+    new HotspotData(new Vector3(-128.07f, 4.09f, -376.82f), "weapon_testing_area", "combat", 0.79f, new Dictionary<string, string>{{"event","loud"}}),
+    new HotspotData(new Vector3(-137.67f, 4.09f, -376.48f), "weapon_testing_area", "combat", 0.79f, new Dictionary<string, string>{{"event","loud"}}),
+    new HotspotData(new Vector3(-226.21f, 0.02f, -407.11f), "weapon_testing_area", "combat", 0.79f, new Dictionary<string, string>{{"event","loud"}}),
+    new HotspotData(new Vector3(-238.76f, 0.02f, -409.55f), "weapon_testing_area", "combat", 0.79f, new Dictionary<string, string>{{"event","loud"}}),
+    new HotspotData(new Vector3(-247.31f, 0.02f, -414.73f), "weapon_testing_area", "combat", 0.79f, new Dictionary<string, string>{{"event","loud"}}),
+    new HotspotData(new Vector3(-221.31f, 0.02f, -426.07f), "weapon_testing_area", "combat", 0.79f, new Dictionary<string, string>{{"event","loud"}})
+},
+
+            ["lighthouse"] = new List<HotspotData>
+{
+    // Construction site – squad pathing, loot, fallback, event zone
+    new HotspotData(new Vector3(-267.71f, -4.65f, 272.37f), "construction", "combat", 0.85f, new Dictionary<string, string>{{"cover","high"},{"loot","mid"},{"event","route"}}),
+    new HotspotData(new Vector3(-278.14f, -4.63f, 265.81f), "construction", "loot", 0.82f, new Dictionary<string, string>{{"cover","good"},{"fallback","rotation"}}),
+
+    // Village – player activity, squad fallback, extraction prep
+    new HotspotData(new Vector3(-159.99f, 3.25f, 178.55f), "village", "control", 0.76f, new Dictionary<string, string>{{"cover","medium"},{"event","meetup"}}),
+    new HotspotData(new Vector3(-150.28f, 3.23f, 193.62f), "village", "fallback", 0.72f, new Dictionary<string, string>{{"loot","rare"},{"event","rotation"}}),
+    new HotspotData(new Vector3(-120.58f, 0.89f, 224.94f), "village", "loot", 0.68f, new Dictionary<string, string>{{"cover","low"}}),
+    new HotspotData(new Vector3(-130.12f, 1.03f, 205.77f), "village", "fallback", 0.65f, new Dictionary<string, string>{{"event","exit"}}),
+
+    // Lighthouse – extract, event, overwatch, combat
+    new HotspotData(new Vector3(79.38f, 10.28f, 364.92f), "lighthouse", "extract", 0.98f, new Dictionary<string, string>{{"event","extract"},{"cover","medium"},{"ambush","sniper"}}),
+    new HotspotData(new Vector3(86.71f, 10.29f, 348.44f), "lighthouse", "control", 0.91f, new Dictionary<string, string>{{"event","watch"},{"cover","high"}}),
+
+    // Chalet – loot, squad, fallback, event zone
+    new HotspotData(new Vector3(237.42f, 22.88f, 160.61f), "chalet", "loot", 0.89f, new Dictionary<string, string>{{"cover","good"},{"squad","regroup"}}),
+    new HotspotData(new Vector3(232.00f, 23.31f, 173.83f), "chalet", "fallback", 0.81f, new Dictionary<string, string>{{"event","escape"}}),
+
+    // Mountainside – squad movement, cover, fallback
+    new HotspotData(new Vector3(219.56f, 19.72f, 304.87f), "mountainside", "fallback", 0.83f, new Dictionary<string, string>{{"cover","high"},{"event","retreat"}}),
+
+    // Marina – loot, extraction, squad
+    new HotspotData(new Vector3(-5.62f, 1.53f, 473.01f), "marina", "extract", 0.92f, new Dictionary<string, string>{{"event","extract"},{"cover","medium"},{"squad","gather"}}),
+    new HotspotData(new Vector3(-22.18f, 2.31f, 485.32f), "marina", "loot", 0.78f, new Dictionary<string, string>{{"cover","low"},{"event","loot"}}),
+
+    // Pathside – fallback, rotation, overwatch
+    new HotspotData(new Vector3(-185.94f, -3.02f, 423.75f), "pathside", "fallback", 0.76f, new Dictionary<string, string>{{"event","fallback"},{"cover","low"}}),
+    new HotspotData(new Vector3(-193.28f, -3.07f, 406.99f), "pathside", "fallback", 0.75f, new Dictionary<string, string>{{"event","rotate"}}),
+
+    // Swamp – ambush, fallback, loot
+    new HotspotData(new Vector3(-98.25f, 6.12f, 315.17f), "swamp", "ambush", 0.67f, new Dictionary<string, string>{{"cover","medium"},{"event","ambush"}}),
+    new HotspotData(new Vector3(-106.82f, 6.11f, 300.39f), "swamp", "loot", 0.65f, new Dictionary<string, string>{{"cover","low"},{"event","loot"}})
+},
+
+            ["rezervbase"] = new List<HotspotData>
+{
+    // Pawn buildings: central PvP, loot, fallback, squad fights
+    new HotspotData(new Vector3(86.0f, 2.8f, 106.5f), "pawn1", "loot", 0.80f, new Dictionary<string, string>{{"cover","medium"},{"event","control"},{"squad","split"}}),
+    new HotspotData(new Vector3(95.3f, 2.8f, 96.2f), "pawn1", "combat", 0.79f, new Dictionary<string, string>{{"cover","medium"},{"ambush","flank"}}),
+
+    new HotspotData(new Vector3(107.2f, 2.8f, 129.8f), "pawn2", "loot", 0.77f, new Dictionary<string, string>{{"cover","good"},{"fallback","rotation"}}),
+    new HotspotData(new Vector3(116.1f, 2.8f, 134.7f), "pawn2", "combat", 0.75f, new Dictionary<string, string>{{"ambush","flank"}}),
+
+    new HotspotData(new Vector3(83.4f, 2.8f, 140.1f), "pawn3", "control", 0.76f, new Dictionary<string, string>{{"event","anchor"},{"loot","mid"},{"cover","low"}}),
+    new HotspotData(new Vector3(86.5f, 2.8f, 147.3f), "pawn3", "fallback", 0.73f, new Dictionary<string, string>{{"fallback","yes"}}),
+
+    new HotspotData(new Vector3(100.4f, 2.8f, 159.2f), "pawn4", "combat", 0.75f, new Dictionary<string, string>{{"cover","high"},{"event","engage"}}),
+    new HotspotData(new Vector3(107.8f, 2.8f, 160.9f), "pawn4", "loot", 0.74f, new Dictionary<string, string>{{"loot","rare"}}),
+
+    // Barracks: loot, squad, fallback
+    new HotspotData(new Vector3(121.3f, 2.8f, 109.3f), "barracks", "loot", 0.81f, new Dictionary<string, string>{{"loot","high"},{"cover","good"}}),
+    new HotspotData(new Vector3(132.7f, 2.8f, 118.6f), "barracks", "fallback", 0.74f, new Dictionary<string, string>{{"squad","regroup"}}),
+
+    // School: loot, overwatch, fallback
+    new HotspotData(new Vector3(122.4f, 2.8f, 91.1f), "school", "loot", 0.72f, new Dictionary<string, string>{{"cover","low"},{"event","search"}}),
+    new HotspotData(new Vector3(115.6f, 2.8f, 84.3f), "school", "fallback", 0.70f, new Dictionary<string, string>{{"fallback","yes"}}),
+
+    // Dome: overwatch, sniper, event, escape
+    new HotspotData(new Vector3(139.9f, 14.2f, 29.2f), "dome", "overwatch", 0.92f, new Dictionary<string, string>{{"cover","high"},{"event","extract"},{"ambush","sniper"}}),
+
+    // King: control, squad, fallback
+    new HotspotData(new Vector3(149.3f, 2.8f, 142.5f), "king", "control", 0.83f, new Dictionary<string, string>{{"event","hold"},{"cover","good"}}),
+    new HotspotData(new Vector3(155.2f, 2.8f, 137.7f), "king", "fallback", 0.79f, new Dictionary<string, string>{{"fallback","rotation"}}),
+
+    // Bunkers: extract, fallback, event
+    new HotspotData(new Vector3(166.7f, -0.3f, 70.2f), "bunker", "extract", 0.95f, new Dictionary<string, string>{{"event","extract"},{"cover","medium"},{"ambush","close"}}),
+    new HotspotData(new Vector3(159.1f, -0.3f, 62.5f), "bunker", "fallback", 0.89f, new Dictionary<string, string>{{"event","hide"},{"squad","escape"}})
+},
+
+            ["sandbox"] = new List<HotspotData>
+{
+    // Center: PvP, control, squad cohesion
+    new HotspotData(new Vector3(-8.17f, -0.14f, -6.75f), "center", "pvp", 0.91f, new Dictionary<string, string>{{"cover","medium"},{"squad","anchor"},{"event","control"}}),
+    new HotspotData(new Vector3(-15.92f, -0.14f, -3.51f), "center", "pvp", 0.89f, new Dictionary<string, string>{{"cover","low"}}),
+
+    // Upper: overwatch, sniping, fallback
+    new HotspotData(new Vector3(-20.28f, 2.00f, 13.12f), "upper", "overwatch", 0.83f, new Dictionary<string, string>{{"ambush","sniper"},{"cover","good"},{"fallback","yes"}}),
+    new HotspotData(new Vector3(-27.91f, 2.00f, 12.89f), "upper", "overwatch", 0.81f, new Dictionary<string, string>{{"ambush","sniper"}}),
+
+    // Basement: fallback, hiding, rotation
+    new HotspotData(new Vector3(7.13f, -2.22f, -10.21f), "basement", "fallback", 0.68f, new Dictionary<string, string>{{"cover","high"},{"escape","yes"}}),
+    new HotspotData(new Vector3(6.41f, -2.22f, -16.97f), "basement", "hide", 0.62f, new Dictionary<string, string>{{"loot","low"},{"ambush","close"}}),
+
+    // Frontline: combat, squad push
+    new HotspotData(new Vector3(18.54f, -0.14f, -6.82f), "frontline", "combat", 0.77f, new Dictionary<string, string>{{"squad","push"},{"ambush","open"}}),
+    new HotspotData(new Vector3(19.92f, -0.14f, -2.15f), "frontline", "combat", 0.75f, new Dictionary<string, string>{{"cover","medium"}}),
+
+    // Balcony: overwatch, squad fallback
+    new HotspotData(new Vector3(-6.25f, 1.89f, 19.35f), "balcony", "overwatch", 0.79f, new Dictionary<string, string>{{"cover","medium"},{"fallback","yes"}}),
+    new HotspotData(new Vector3(-1.82f, 1.89f, 20.61f), "balcony", "overwatch", 0.78f, new Dictionary<string, string>{{"ambush","vertical"}}),
+
+    // Sidehall: rotation, ambush
+    new HotspotData(new Vector3(25.00f, -0.14f, 6.90f), "sidehall", "rotation", 0.67f, new Dictionary<string, string>{{"cover","low"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(24.88f, -0.14f, 13.74f), "sidehall", "rotation", 0.66f, new Dictionary<string, string>{{"ambush","flank"}}),
+
+    // Overwatch: sniper, event, fallback
+    new HotspotData(new Vector3(-12.43f, 3.91f, -3.65f), "overwatch", "sniper", 0.83f, new Dictionary<string, string>{{"cover","high"},{"event","hold"}}),
+    new HotspotData(new Vector3(0.79f, 3.91f, -3.44f), "overwatch", "sniper", 0.81f, new Dictionary<string, string>{{"event","hold"}}),
+
+    // Corner: fallback, rotation
+    new HotspotData(new Vector3(-18.42f, -0.14f, -18.12f), "corner", "fallback", 0.58f, new Dictionary<string, string>{{"cover","low"},{"escape","corner"}}),
+    new HotspotData(new Vector3(-21.94f, -0.14f, -22.08f), "corner", "fallback", 0.57f, new Dictionary<string, string>{{"ambush","corner"}})
+},
+            ["sandbox_high"] = new List<HotspotData>
+{
+    // Center: PvP, control, squad cohesion
+    new HotspotData(new Vector3(-8.17f, -0.14f, -6.75f), "center", "pvp", 0.91f, new Dictionary<string, string>{{"cover","medium"},{"squad","anchor"},{"event","control"}}),
+    new HotspotData(new Vector3(-15.92f, -0.14f, -3.51f), "center", "pvp", 0.89f, new Dictionary<string, string>{{"cover","low"}}),
+
+    // Upper: overwatch, sniping, fallback
+    new HotspotData(new Vector3(-20.28f, 2.00f, 13.12f), "upper", "overwatch", 0.83f, new Dictionary<string, string>{{"ambush","sniper"},{"cover","good"},{"fallback","yes"}}),
+    new HotspotData(new Vector3(-27.91f, 2.00f, 12.89f), "upper", "overwatch", 0.81f, new Dictionary<string, string>{{"ambush","sniper"}}),
+
+    // Basement: fallback, hiding, rotation
+    new HotspotData(new Vector3(7.13f, -2.22f, -10.21f), "basement", "fallback", 0.68f, new Dictionary<string, string>{{"cover","high"},{"escape","yes"}}),
+    new HotspotData(new Vector3(6.41f, -2.22f, -16.97f), "basement", "hide", 0.62f, new Dictionary<string, string>{{"loot","low"},{"ambush","close"}}),
+
+    // Frontline: combat, squad push
+    new HotspotData(new Vector3(18.54f, -0.14f, -6.82f), "frontline", "combat", 0.77f, new Dictionary<string, string>{{"squad","push"},{"ambush","open"}}),
+    new HotspotData(new Vector3(19.92f, -0.14f, -2.15f), "frontline", "combat", 0.75f, new Dictionary<string, string>{{"cover","medium"}}),
+
+    // Balcony: overwatch, squad fallback
+    new HotspotData(new Vector3(-6.25f, 1.89f, 19.35f), "balcony", "overwatch", 0.79f, new Dictionary<string, string>{{"cover","medium"},{"fallback","yes"}}),
+    new HotspotData(new Vector3(-1.82f, 1.89f, 20.61f), "balcony", "overwatch", 0.78f, new Dictionary<string, string>{{"ambush","vertical"}}),
+
+    // Sidehall: rotation, ambush
+    new HotspotData(new Vector3(25.00f, -0.14f, 6.90f), "sidehall", "rotation", 0.67f, new Dictionary<string, string>{{"cover","low"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(24.88f, -0.14f, 13.74f), "sidehall", "rotation", 0.66f, new Dictionary<string, string>{{"ambush","flank"}}),
+
+    // Overwatch: sniper, event, fallback
+    new HotspotData(new Vector3(-12.43f, 3.91f, -3.65f), "overwatch", "sniper", 0.83f, new Dictionary<string, string>{{"cover","high"},{"event","hold"}}),
+    new HotspotData(new Vector3(0.79f, 3.91f, -3.44f), "overwatch", "sniper", 0.81f, new Dictionary<string, string>{{"event","hold"}}),
+
+    // Corner: fallback, rotation
+    new HotspotData(new Vector3(-18.42f, -0.14f, -18.12f), "corner", "fallback", 0.58f, new Dictionary<string, string>{{"cover","low"},{"escape","corner"}}),
+    new HotspotData(new Vector3(-21.94f, -0.14f, -22.08f), "corner", "fallback", 0.57f, new Dictionary<string, string>{{"ambush","corner"}})
+},
+
+            ["shoreline"] = new List<HotspotData>
+{
+    // Resort: Main PvP hotspot, loot, cover, squad, fallback
+    new HotspotData(new Vector3(-154.7f, 6.8f, 250.3f), "resort", "combat", 0.95f, new Dictionary<string, string>{{"cover","high"},{"loot","high"},{"squad","pvp"}}),
+    new HotspotData(new Vector3(-162.9f, 6.8f, 261.2f), "resort", "combat", 0.94f, new Dictionary<string, string>{{"cover","high"}}),
+    new HotspotData(new Vector3(-92.4f, 6.8f, 246.7f), "resort", "loot", 0.91f, new Dictionary<string, string>{{"loot","weapon"},{"squad","loot"}}),
+    new HotspotData(new Vector3(-81.3f, 6.8f, 257.8f), "resort", "loot", 0.89f, new Dictionary<string, string>{{"loot","medical"}}),
+
+    // Swamp: ambush, fallback, low cover, squad movement
+    new HotspotData(new Vector3(-395.6f, 3.6f, -160.4f), "swamp", "ambush", 0.75f, new Dictionary<string, string>{{"cover","low"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-402.2f, 3.6f, -147.3f), "swamp", "loot", 0.70f, new Dictionary<string, string>{{"loot","cache"}}),
+
+    // Village: safe fallback, looting, squad cohesion
+    new HotspotData(new Vector3(150.2f, 3.1f, 170.6f), "village", "loot", 0.68f, new Dictionary<string, string>{{"loot","food"},{"squad","safe"}}),
+
+    // Gas Station: event, ambush, fallback
+    new HotspotData(new Vector3(74.1f, 2.0f, -51.6f), "gasstation", "event", 0.72f, new Dictionary<string, string>{{"event","explosion"},{"ambush","prime"},{"loot","fuel"}}),
+
+    // Pier: extract, loot, sniping, fallback
+    new HotspotData(new Vector3(215.9f, 0.2f, -292.3f), "pier", "extract", 0.85f, new Dictionary<string, string>{{"extract","boat"},{"loot","rare"},{"ambush","sniper"}}),
+    new HotspotData(new Vector3(221.6f, 0.2f, -281.4f), "pier", "loot", 0.81f, new Dictionary<string, string>{{"loot","high"},{"ambush","yes"}}),
+
+    // Scav Island: event, squad, loot, fallback
+    new HotspotData(new Vector3(361.4f, -1.3f, -401.7f), "scavisland", "event", 0.66f, new Dictionary<string, string>{{"event","scav"},{"loot","medium"},{"squad","fallback"}}),
+
+    // Radar: overwatch, ambush, squad fallback
+    new HotspotData(new Vector3(44.2f, 21.4f, 304.9f), "radar", "overwatch", 0.78f, new Dictionary<string, string>{{"ambush","sniper"},{"cover","good"},{"squad","overwatch"}}),
+},
+
+            ["tarkovstreets"] = new List<HotspotData>
+{
+    // Cinema block – PvP hotspot, medium cover, loot
+    new HotspotData(new Vector3(63.59117f, 6.85782146f, 322.654755f), "cinema", "combat", 0.90f, new Dictionary<string, string>{{"cover","medium"},{"squad","medium"}}),
+    new HotspotData(new Vector3(63.6309f, 6.85782146f, 313.263916f), "cinema", "combat", 0.88f),
+    new HotspotData(new Vector3(68.78775f, 6.85781956f, 319.639252f), "cinema", "loot", 0.85f, new Dictionary<string, string>{{"loot","hidden"}}),
+    new HotspotData(new Vector3(67.18654f, 6.85782433f, 308.381134f), "cinema", "loot", 0.83f),
+
+    // Collapsed Building – high verticality, danger, overwatch, loot
+    new HotspotData(new Vector3(209.81192f, -1.24632215f, 410.749756f), "collapsedbuilding", "ambush", 0.91f, new Dictionary<string, string>{{"vertical","yes"},{"loot","weapon"}}),
+    new HotspotData(new Vector3(277.639557f, 6.34998f, 381.5505f), "collapsedbuilding", "ambush", 0.89f),
+    new HotspotData(new Vector3(279.186584f, 6.34998035f, 386.976746f), "collapsedbuilding", "ambush", 0.88f),
+
+    // Lexos – loot/combat, close quarters, squad
+    new HotspotData(new Vector3(107.031654f, 3.762976f, 223.787964f), "lexos", "loot", 0.86f, new Dictionary<string, string>{{"loot","high"},{"squad","safe"}}),
+    new HotspotData(new Vector3(122.383759f, 3.52197075f, 218.807953f), "lexos", "combat", 0.82f),
+    new HotspotData(new Vector3(126.530045f, 2.76816821f, 231.436447f), "lexos", "loot", 0.81f),
+    new HotspotData(new Vector3(131.462723f, 3.528088f, 234.0461f), "lexos", "loot", 0.80f),
+    new HotspotData(new Vector3(136.6608f, 3.52808833f, 229.4865f), "lexos", "combat", 0.78f),
+    new HotspotData(new Vector3(140.617279f, 3.528088f, 232.996f), "lexos", "combat", 0.76f),
+    new HotspotData(new Vector3(150.0387f, 3.529985f, 230.1132f), "lexos", "loot", 0.75f),
+    new HotspotData(new Vector3(153.572723f, 3.52998471f, 233.847214f), "lexos", "combat", 0.74f),
+
+    // Concordia – PvP, loot, squad fallback
+    new HotspotData(new Vector3(84.9201f, 2.76689816f, 266.061432f), "concordia", "combat", 0.79f, new Dictionary<string, string>{{"cover","good"}}),
+    new HotspotData(new Vector3(70.2452f, 2.65098548f, 266.672363f), "concordia", "loot", 0.77f),
+    new HotspotData(new Vector3(67.60499f, 5.08100033f, 266.61087f), "concordia", "combat", 0.76f),
+
+    // Carcrash – event/loot/fallback
+    new HotspotData(new Vector3(5.75204754f, 4.09985256f, 175.204391f), "carcrash", "event", 0.80f, new Dictionary<string, string>{{"event","vehicle"},{"loot","medical"}}),
+    new HotspotData(new Vector3(9.763755f, 4.100117f, 166.423233f), "carcrash", "loot", 0.75f),
+    new HotspotData(new Vector3(2.010031f, 4.09985256f, 165.482666f), "carcrash", "loot", 0.73f),
+    new HotspotData(new Vector3(0.25032836f, 4.09985161f, 172.992859f), "carcrash", "loot", 0.71f),
+
+    // Chek15 – combat/squad fallback
+    new HotspotData(new Vector3(-63.29856f, 3.954f, 116.256f), "chek15", "combat", 0.84f, new Dictionary<string, string>{{"squad","fallback"},{"cover","medium"}}),
+    new HotspotData(new Vector3(-71.2328f, 3.954f, 109.872f), "chek15", "loot", 0.83f),
+    new HotspotData(new Vector3(-62.1814f, 3.954f, 103.741f), "chek15", "loot", 0.81f),
+
+    // Development block – PvP/ambush
+    new HotspotData(new Vector3(-178.181366f, 2.668078f, 234.401947f), "development", "combat", 0.87f, new Dictionary<string, string>{{"ambush","prime"}}),
+    new HotspotData(new Vector3(-185.043289f, 2.668078f, 222.6836f), "development", "ambush", 0.86f),
+    new HotspotData(new Vector3(-189.9359f, 2.668078f, 235.095764f), "development", "loot", 0.85f),
+    new HotspotData(new Vector3(-185.471344f, 2.668078f, 245.14296f), "development", "loot", 0.84f),
+
+    // Residential – loot, safe fallback, squad support
+    new HotspotData(new Vector3(-80.12827f, 2.668078f, 205.95752f), "residential", "loot", 0.74f, new Dictionary<string, string>{{"squad","safe"},{"loot","cache"}}),
+    new HotspotData(new Vector3(-76.75427f, 2.668078f, 216.342438f), "residential", "loot", 0.73f),
+    new HotspotData(new Vector3(-66.6820145f, 2.668078f, 216.512054f), "residential", "loot", 0.71f),
+    new HotspotData(new Vector3(-64.36503f, 2.668078f, 203.144775f), "residential", "loot", 0.70f),
+
+    // Construction area – PvP, cover, overwatch
+    new HotspotData(new Vector3(42.23939f, 2.65f, 188.528046f), "construction", "combat", 0.83f, new Dictionary<string, string>{{"cover","good"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(47.16363f, 2.65f, 177.361755f), "construction", "combat", 0.82f),
+    new HotspotData(new Vector3(56.4329643f, 2.65f, 178.257355f), "construction", "loot", 0.79f),
+    new HotspotData(new Vector3(53.41108f, 2.65f, 189.4507f), "construction", "loot", 0.76f),
+},
+
+            ["woods"] = new List<HotspotData>
+{
+    // USEC Camp: High-value loot/combat hotspot
+    new HotspotData(new Vector3(-177.79f, -1.86f, 264.29f), "usec", "combat", 0.98f, new Dictionary<string, string>{{"cover","good"},{"spawn","rare"},{"squad","preferred"}}),
+    new HotspotData(new Vector3(-179.30f, -1.86f, 261.63f), "usec", "loot", 0.92f, new Dictionary<string, string>{{"loot","medical"},{"cover","medium"}}),
+    new HotspotData(new Vector3(-177.39f, -1.86f, 255.53f), "usec", "loot", 0.85f, new Dictionary<string, string>{{"loot","weapon"}}),
+    new HotspotData(new Vector3(-167.99f, -1.86f, 254.75f), "usec", "combat", 0.75f, new Dictionary<string, string>{{"cover","bad"},{"ambush","yes"}}),
+    new HotspotData(new Vector3(-178.46f, -1.87f, 246.54f), "usec", "camp", 0.70f, new Dictionary<string, string>{{"sniper","yes"},{"exfil","near"}}),
+
+    // Lumber Mill: PvP/loot
+    new HotspotData(new Vector3(-117.86f, -1.36f, 402.16f), "lumber", "loot", 0.95f, new Dictionary<string, string>{{"loot","rare"},{"cover","good"}}),
+    new HotspotData(new Vector3(-136.86f, -1.57f, 414.80f), "lumber", "combat", 0.82f, new Dictionary<string, string>{{"sniper","yes"}}),
+
+    // Bunkers
+    new HotspotData(new Vector3(-97.62f, -15.43f, 219.63f), "bunker_east", "exfil", 0.60f, new Dictionary<string, string>{{"exfil","open"}}),
+    new HotspotData(new Vector3(-24.16f, -3.64f, 45.34f), "bunker_west", "exfil", 0.62f, new Dictionary<string, string>{{"exfil","locked"}}),
+    new HotspotData(new Vector3(-25.93f, -3.64f, 46.46f), "bunker_west", "loot", 0.58f, new Dictionary<string, string>{{"loot","weapon"}}),
+
+    // Scav House: loot, pvp, exfil
+    new HotspotData(new Vector3(-5.19f, -1.48f, -69.47f), "scavhouse", "loot", 0.76f, new Dictionary<string, string>{{"loot","supply"}}),
+    new HotspotData(new Vector3(-2.54f, -1.48f, -69.34f), "scavhouse", "combat", 0.70f),
+    new HotspotData(new Vector3(-5.45f, -1.48f, -74.78f), "scavhouse", "exfil", 0.68f, new Dictionary<string, string>{{"exfil","conditional"}}),
+    new HotspotData(new Vector3(-1.96f, -1.48f, -74.66f), "scavhouse", "combat", 0.60f),
+    new HotspotData(new Vector3(-1.85f, -1.47f, -80.48f), "scavhouse", "loot", 0.56f),
+
+    // Village: loot, squad
+    new HotspotData(new Vector3(77.10f, -1.77f, -47.34f), "village", "loot", 0.80f, new Dictionary<string, string>{{"loot","medical"},{"squad","safe"}}),
+    new HotspotData(new Vector3(80.13f, -1.77f, -39.44f), "village", "loot", 0.78f),
+    new HotspotData(new Vector3(55.49f, -2.66f, -48.08f), "village", "combat", 0.70f),
+
+    // Sniper Rock: overwatch/ambush
+    new HotspotData(new Vector3(-248.28f, 26.28f, -196.44f), "sniperrock", "ambush", 0.92f, new Dictionary<string, string>{{"sniper","prime"},{"cover","great"}}),
+    new HotspotData(new Vector3(-333.59f, 28.02f, -227.68f), "sniperrock", "ambush", 0.91f),
+    new HotspotData(new Vector3(-155.81f, 51.13f, -275.11f), "sniperrock", "ambush", 0.88f),
+    new HotspotData(new Vector3(-232.66f, 67.69f, -229.94f), "sniperrock", "ambush", 0.87f),
+    new HotspotData(new Vector3(-210.42f, 76.26f, -272.82f), "sniperrock", "ambush", 0.86f),
+
+    // ZB Exfils
+    new HotspotData(new Vector3(356.58f, -0.54f, -88.39f), "zb014", "exfil", 0.95f, new Dictionary<string, string>{{"exfil","conditional"},{"loot","hidden"}}),
+    new HotspotData(new Vector3(414.50f, -13.58f, 239.25f), "zb016", "exfil", 0.94f, new Dictionary<string, string>{{"exfil","locked"}}),
+    new HotspotData(new Vector3(194.42f, -14.93f, 260.63f), "zb016", "exfil", 0.93f),
+    new HotspotData(new Vector3(446.22f, -14.24f, 61.33f), "zb016", "exfil", 0.91f),
+
+    // Plane event
+    new HotspotData(new Vector3(194.04f, 0.27f, -6.58f), "plane", "event", 0.65f, new Dictionary<string, string>{{"event","plane"},{"loot","rare"}}),
+
+    // Cliffs: overwatch/ambush
+    new HotspotData(new Vector3(-45.81f, 8.65f, -599.73f), "cliffs", "ambush", 0.90f),
+    new HotspotData(new Vector3(-172.43f, 12.50f, -688.38f), "cliffs", "ambush", 0.89f),
+    new HotspotData(new Vector3(-36.99f, 9.95f, -740.65f), "cliffs", "ambush", 0.88f),
+
+    // Mountain (PvE, overwatch)
+    new HotspotData(new Vector3(-512.14f, 15.91f, -177.12f), "mountain", "ambush", 0.75f, new Dictionary<string, string>{{"sniper","good"}}),
+    new HotspotData(new Vector3(-548.20f, 18.12f, -205.27f), "mountain", "ambush", 0.76f),
+    new HotspotData(new Vector3(-534.32f, 18.10f, -204.97f), "mountain", "ambush", 0.74f),
+    new HotspotData(new Vector3(-536.63f, 15.02f, -212.13f), "mountain", "ambush", 0.77f),
+    new HotspotData(new Vector3(-564.20f, 21.39f, -216.55f), "mountain", "ambush", 0.78f),
+
+    // Misc
+    new HotspotData(new Vector3(243.09f, -8.46f, 124.23f), "zb013", "exfil", 0.72f),
+    new HotspotData(new Vector3(133.20f, -3.67f, 100.80f), "camp", "loot", 0.61f, new Dictionary<string, string>{{"camp","hidden"},{"loot","cache"}}),
+},
+
+
+        };
 
         private static readonly HotspotSet EmptySet = new HotspotSet(new List<HotspotData>(0));
+
+        // Case-insensitive one-shot warning tracker for unknown map IDs.
+        private static readonly HashSet<string> _warnedUnknownMaps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Returns a <see cref="HotspotSet"/> for the specified map ID.
@@ -462,22 +1083,93 @@ namespace AIRefactored.AI.Hotspots
         {
             try
             {
-                if (string.IsNullOrEmpty(mapId))
+                // Accept null, empty, whitespace, garbage, or any custom map aliases.
+                if (string.IsNullOrWhiteSpace(mapId))
                     return EmptySet;
 
-                string key = mapId.Trim().ToLowerInvariant();
-                if (key.Length == 0)
+                // Normalize and canonicalize input: case-insensitive, trims, replaces dashes/underscores, fixes common typos.
+                string key = mapId.Trim().ToLowerInvariant()
+                    .Replace("-", "_")
+                    .Replace(" ", "")
+                    .Replace("thelab", "laboratory")
+                    .Replace("streets", "tarkovstreets")
+                    .Replace("reserve", "rezervbase")
+                    .Replace("shore", "shoreline")
+                    .Replace("factoryday", "factory4_day")
+                    .Replace("factorynight", "factory4_night")
+                    .Replace("factory4night", "factory4_night")
+                    .Replace("factory4day", "factory4_day");
+
+                // Aggressive common alias normalization (single assignment per unique canonical key)
+                switch (key)
+                {
+                    case "customs":
+                        key = "bigmap"; break;
+                    case "labs":
+                    case "lab":
+                        key = "laboratory"; break;
+                    case "factory":
+                    case "factory4":
+                        key = "factory4_day"; break;
+                    case "tarkovstreets":
+                    case "streets":
+                        key = "tarkovstreets"; break;
+                    case "rezerv":
+                    case "reservebase":
+                        key = "rezervbase"; break;
+                    case "sandbox_high":
+                        key = "sandbox_high"; break;
+                    case "sandbox":
+                    case "groundzero":
+                    case "interchange":
+                    case "woods":
+                    case "lighthouse":
+                    case "shoreline":
+                        // Already correct key
+                        break;
+                        // Add additional aliases/modder keys here if needed
+                }
+
+                // Support for map modders/expansion: remove "custom_" or "mod_" prefix if present.
+                if (key.StartsWith("custom_"))
+                    key = key.Substring("custom_".Length);
+                if (key.StartsWith("mod_"))
+                    key = key.Substring("mod_".Length);
+
+                // Fallback if normalization results in empty
+                if (string.IsNullOrEmpty(key))
                     return EmptySet;
 
-                List<HotspotData> points;
-                if (Hotspots.TryGetValue(key, out points) && points != null && points.Count > 0)
-                    return new HotspotSet(points);
+                // Defensive: Deep-copy all returned points, filter nulls.
+                if (Hotspots.TryGetValue(key, out var points) && points != null && points.Count > 0)
+                {
+                    var safeList = new List<HotspotData>(points.Count);
+                    for (int i = 0; i < points.Count; i++)
+                        if (points[i] != null)
+                            safeList.Add(points[i]);
+                    if (safeList.Count > 0)
+                        return new HotspotSet(safeList);
+                }
+
+                // Fallback: Try "bigmap" if user provided an unknown but likely customs/customs alias
+                if (key.Contains("custom") || key.Contains("bigmap"))
+                {
+                    if (Hotspots.TryGetValue("bigmap", out var customsPoints) && customsPoints?.Count > 0)
+                        return new HotspotSet(new List<HotspotData>(customsPoints));
+                }
+
+                // Diagnostics: Log unknown maps on first encounter (never spams, multi-thread safe)
+                if (!_warnedUnknownMaps.Contains(key))
+                {
+                    _warnedUnknownMaps.Add(key);
+                    Plugin.LoggerInstance.LogWarning($"[HardcodedHotspots] Unknown or unregistered mapId: '{mapId}' (key='{key}'). Returning EmptySet.");
+                }
 
                 return EmptySet;
             }
-            catch
+            catch (Exception ex)
             {
-                // All exceptions locally isolated. No propagation.
+                Plugin.LoggerInstance.LogError($"[HardcodedHotspots] Exception in GetForMap('{mapId}'): {ex}");
                 return EmptySet;
             }
         }

@@ -6,42 +6,51 @@
 
 namespace AIRefactored.AI.Movement
 {
+    using AIRefactored.AI.Core;
+    using AIRefactored.AI.Helpers;
+    using EFT;
     using System;
     using UnityEngine;
 
     /// <summary>
     /// Move intent audit record (public for telemetry/debug).
     /// </summary>
-    public readonly struct MoveAudit
+    public struct MoveAudit
     {
         public readonly Vector3 Target;
         public readonly float Time;
         public readonly string Context;
+        public readonly BotOverlayType Overlay;
+        public readonly int SquadId;
+        public readonly int IntentType;
+        public readonly string Meta;
 
-        public MoveAudit(Vector3 target, float time, string context)
+        public MoveAudit(Vector3 target, float time, string context, BotOverlayType overlay, int squadId, int intentType, string meta)
         {
             Target = target;
             Time = time;
-            Context = context ?? "";
+            Context = context ?? string.Empty;
+            Overlay = overlay;
+            SquadId = squadId;
+            IntentType = intentType;
+            Meta = meta ?? string.Empty;
         }
     }
 
     /// <summary>
-    /// Centralized arbitration/event-driven move cache.
-    /// Tracks, dedupes, and audits all overlay/event bot movement.
-    /// Bulletproof: anti-spam, anti-oscillation, anti-micro, anti-NaN/Inf, squad/event overlay aware.
-    /// Pooled, error-guarded, multiplayer/headless robust, SPT/FIKA/vanilla safe.
+    /// Centralized arbitration/event-driven move cache for overlay-driven bot movement.
+    /// Bulletproof: anti-spam, anti-loop, anti-oscillation, anti-NaN/Inf/Y, audit, squad/event/intent parity, zero alloc, pooled, error-shielded.
     /// </summary>
     public sealed class BotMoveCache
     {
         #region Constants
 
-        private const float MoveCooldown = 1.5f;
-        private const float MinMoveDeltaSqr = 0.25f;
-        private const float AntiOscillationWindow = 2.5f;
+        private const float MoveCooldown = 1.45f;
+        private const float MinMoveDeltaSqr = 0.20f;
+        private const float AntiOscillationWindow = 2.7f;
         private const int MaxOscillationCount = 3;
-        private const float MinYDeltaForNewMove = 0.5f;
-        private const int AuditHistorySize = 8;
+        private const float MinYDeltaForNewMove = 0.49f;
+        private const int AuditHistorySize = 12;
 
         #endregion
 
@@ -53,6 +62,7 @@ namespace AIRefactored.AI.Movement
         public float LastMoveTime { get; private set; } = -1000f;
         public string LastMoveContext { get; private set; } = "";
         public int LastMoveIntentType { get; private set; } = 0;
+        public BotOverlayType LastOverlayType { get; private set; } = BotOverlayType.None;
         public bool AnticipationActive { get; set; } = false;
         public bool EventLockoutActive { get; set; } = false;
         public int LastSquadGroupId { get; private set; } = 0;
@@ -81,6 +91,7 @@ namespace AIRefactored.AI.Movement
             LastMoveTime = -1000f;
             LastMoveContext = "";
             LastMoveIntentType = 0;
+            LastOverlayType = BotOverlayType.None;
             AnticipationActive = false;
             EventLockoutActive = false;
             LastSquadGroupId = 0;
@@ -89,7 +100,7 @@ namespace AIRefactored.AI.Movement
             _lastSwapTime = -1000f;
             _moveHistoryPos = 0;
             for (int i = 0; i < _moveHistory.Length; i++)
-                _moveHistory[i] = new MoveAudit(Vector3.zero, -1000f, "");
+                _moveHistory[i] = new MoveAudit(Vector3.zero, -1000f, "", BotOverlayType.None, 0, 0, "");
         }
 
         /// <summary>
@@ -133,9 +144,14 @@ namespace AIRefactored.AI.Movement
 
         /// <summary>
         /// Audits and records a new move request.
-        /// Updates context, intent, squad ID, and audit log. Never throws on invalid input.
+        /// Updates context, intent, squad ID, overlay, and audit log. Never throws on invalid input.
         /// </summary>
-        public void AuditMove(Vector3 target, float now, string context, int intentType = 0, int squadId = 0, string meta = "")
+        public void AuditMove(
+            Vector3 target, float now, string context,
+            BotOverlayType overlay = BotOverlayType.None,
+            int intentType = 0,
+            int squadId = 0,
+            string meta = "")
         {
             if (!IsValid(target)) return;
 
@@ -158,10 +174,11 @@ namespace AIRefactored.AI.Movement
             LastMoveTime = now;
             LastMoveContext = context ?? "";
             LastMoveIntentType = intentType;
+            LastOverlayType = overlay;
             LastSquadGroupId = squadId;
             LastMoveMeta = meta ?? "";
 
-            _moveHistory[_moveHistoryPos] = new MoveAudit(target, now, context ?? "");
+            _moveHistory[_moveHistoryPos] = new MoveAudit(target, now, context ?? "", overlay, squadId, intentType, meta ?? "");
             _moveHistoryPos = (_moveHistoryPos + 1) % _moveHistory.Length;
         }
 
@@ -205,6 +222,72 @@ namespace AIRefactored.AI.Movement
         /// Returns the timestamp of the last move swap (for debugging/metrics).
         /// </summary>
         public float GetLastSwapTime() => _lastSwapTime;
+
+        /// <summary>
+        /// Returns true if a candidate move is redundant (already issued, not oscillating).
+        /// </summary>
+        public bool IsMoveRedundant(Vector3 candidate, BotOverlayType overlayType, float now = -1f)
+        {
+            if (!IsValid(candidate)) return true;
+            if (!IsValid(LastIssuedTarget)) return false;
+            if ((candidate - LastIssuedTarget).sqrMagnitude < MinMoveDeltaSqr)
+            {
+                // Still check if oscillation block is active
+                if (now < 0f) now = Time.time;
+                return !IsOscillationBlocked(now);
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Registers a new move for anti-spam/oscillation and audit.
+        /// </summary>
+        public void RegisterMove(
+            Vector3 candidate,
+            BotOverlayType overlayType,
+            float now,
+            string context = "",
+            int intentType = 0,
+            int squadId = 0,
+            string meta = "")
+        {
+            AuditMove(candidate, now, context, overlayType, intentType, squadId, meta);
+        }
+
+        /// <summary>
+        /// Static helper: registers a new move for a bot owner and overlay type.
+        /// </summary>
+        public static void RegisterMove(
+            BotOwner bot,
+            Vector3 candidate,
+            BotOverlayType overlayType,
+            float now,
+            string context = "",
+            int intentType = 0,
+            int squadId = 0,
+            string meta = "")
+        {
+            var cache = BotCacheUtility.GetCache(bot);
+            cache?.MoveCache?.RegisterMove(candidate, overlayType, now, context, intentType, squadId, meta);
+        }
+
+        /// <summary>
+        /// Static helper: checks if a move for a bot is redundant.
+        /// </summary>
+        public static bool IsMoveRedundant(BotOwner bot, Vector3 candidate, BotOverlayType overlayType)
+        {
+            var cache = BotCacheUtility.GetCache(bot);
+            return cache?.MoveCache?.IsMoveRedundant(candidate, overlayType) ?? false;
+        }
+
+        /// <summary>
+        /// Static helper: fetches last move target for a bot (or Vector3.zero).
+        /// </summary>
+        public static Vector3 GetLastMoveTarget(BotOwner bot)
+        {
+            var cache = BotCacheUtility.GetCache(bot);
+            return cache?.MoveCache?.LastIssuedTarget ?? Vector3.zero;
+        }
 
         #endregion
     }

@@ -13,7 +13,7 @@ namespace AIRefactored.AI.Groups
     using UnityEngine;
 
     /// <summary>
-    /// Computes dynamic, drifted squad offsets per bot to prevent clumping, ensure realism, and preserve spacing.
+    /// Computes dynamic, drifted squad offsets per bot to prevent clumping, ensure realism, and preserve formation spacing.
     /// Must be ticked externally from BotBrain or overlay/event system. All calculations are profile- and group-size-seeded.
     /// Bulletproof: never disables, never throws, zero-alloc in Tick, 100% event/overlay safe.
     /// </summary>
@@ -21,11 +21,13 @@ namespace AIRefactored.AI.Groups
     {
         #region Constants
 
-        private const float BaseSpacing = 2.25f;
-        private const float MinSpacing = 1.25f;
-        private const float MaxSpacing = 6.5f;
-        private const float DriftChangeInterval = 5.7f;
-        private const float MaxDriftDistance = 0.41f;
+        private const float BaseSpacing = 2.35f;
+        private const float MinSpacing = 1.2f;
+        private const float MaxSpacing = 7.0f;
+        private const float DriftChangeInterval = 5.5f;
+        private const float MaxDriftDistance = 0.48f;
+        private const float MaxFormationSpread = 9.0f;
+        private const float HeightTolerance = 2.8f;
 
         #endregion
 
@@ -39,14 +41,17 @@ namespace AIRefactored.AI.Groups
         private float _nextDriftUpdate;
         private Vector2 _driftOffset;
         private float _lastTickTime;
+        private bool _isLeader;
+        private int _cachedIndex;
+        private float _formationSpread;
+        private float _lastFormationSeed;
 
         #endregion
 
         #region Initialization
 
         /// <summary>
-        /// Initializes the path coordinator for the given bot cache.
-        /// Bulletproof: all null-guarded, resets on invalid state.
+        /// Initializes the path coordinator for the given bot cache. Bulletproof: all null-guarded, resets on invalid state.
         /// </summary>
         public void Initialize(BotComponentCache cache)
         {
@@ -68,6 +73,10 @@ namespace AIRefactored.AI.Groups
             _driftOffset = Vector2.zero;
             _nextDriftUpdate = Time.realtimeSinceStartup + GetInitialDriftInterval();
             _lastTickTime = Time.realtimeSinceStartup;
+            _isLeader = false;
+            _cachedIndex = -1;
+            _formationSpread = 0f;
+            _lastFormationSeed = -1f;
         }
 
         private void Reset()
@@ -80,6 +89,10 @@ namespace AIRefactored.AI.Groups
             _driftOffset = Vector2.zero;
             _nextDriftUpdate = 0f;
             _lastTickTime = 0f;
+            _isLeader = false;
+            _cachedIndex = -1;
+            _formationSpread = 0f;
+            _lastFormationSeed = -1f;
         }
 
         #endregion
@@ -96,8 +109,10 @@ namespace AIRefactored.AI.Groups
                 return;
 
             int size = _group.MembersCount;
-            if (!_offsetInitialized || size != _lastGroupSize)
+            if (!_offsetInitialized || size != _lastGroupSize || Time.frameCount % 6 == 0)
             {
+                _cachedIndex = GetBotIndexInGroup(_bot, _group);
+                _formationSpread = Mathf.Clamp(BaseSpacing + (size - 2) * 0.43f, MinSpacing, MaxFormationSpread);
                 _cachedOffset = ComputeOffset();
                 _lastGroupSize = size;
                 _offsetInitialized = true;
@@ -136,7 +151,7 @@ namespace AIRefactored.AI.Groups
 
         /// <summary>
         /// Computes the base formation offset for this bot in the group.
-        /// Profile-seeded, group-indexed, bulletproof.
+        /// Profile-seeded, group-indexed, bulletproof, always realistic.
         /// </summary>
         private Vector3 ComputeOffset()
         {
@@ -145,7 +160,7 @@ namespace AIRefactored.AI.Groups
                 if (_bot == null || _group == null || _bot.IsDead || _group.MembersCount < 2)
                     return Vector3.zero;
 
-                int index = GetBotIndexInGroup(_bot, _group);
+                int index = _cachedIndex >= 0 ? _cachedIndex : GetBotIndexInGroup(_bot, _group);
                 if (index < 0)
                     return Vector3.zero;
 
@@ -153,38 +168,49 @@ namespace AIRefactored.AI.Groups
                 if (string.IsNullOrEmpty(pid))
                     return Vector3.zero;
 
-                int seed = unchecked(pid.GetHashCode() ^ (_group.MembersCount * 397));
+                // Seed by profile, index, group size for full formation randomness
+                int seed = unchecked(pid.GetHashCode() ^ (index * 1709) ^ (_group.MembersCount * 73));
                 var rand = new System.Random(seed);
 
-                float baseNoise = (float)(rand.NextDouble() * 0.9 - 0.45f);
-                float spacing = Mathf.Clamp(BaseSpacing + baseNoise, MinSpacing, MaxSpacing);
+                float spacingNoise = (float)(rand.NextDouble() * 1.25 - 0.62f);
+                float spacing = Mathf.Clamp(_formationSpread + spacingNoise, MinSpacing, MaxSpacing);
 
-                float r = (float)rand.NextDouble();
-                float angleStep, angleDeg;
-                if (r < 0.43f)
+                float arrangement = (float)rand.NextDouble();
+                float angleDeg, angleStep;
+                if (arrangement < 0.33f)
                 {
-                    angleStep = 70f / (_group.MembersCount - 1);
-                    angleDeg = -35f + index * angleStep;
+                    // Flank wedge (triangle left/right)
+                    angleStep = 55f / (_group.MembersCount - 1);
+                    angleDeg = -27.5f + index * angleStep;
                 }
-                else if (r < 0.76f)
+                else if (arrangement < 0.67f)
                 {
-                    angleStep = 60f / (_group.MembersCount - 1);
-                    angleDeg = -30f + index * angleStep;
+                    // Tight V/line
+                    angleStep = 38f / (_group.MembersCount - 1);
+                    angleDeg = -19f + index * angleStep;
                 }
                 else
                 {
+                    // Ring/box/column
                     angleStep = 360f / _group.MembersCount;
-                    angleDeg = index * angleStep + (float)(rand.NextDouble() * 16.0 - 8.0);
+                    angleDeg = index * angleStep + (float)(rand.NextDouble() * 20.0 - 10.0);
                 }
 
                 float rad = angleDeg * Mathf.Deg2Rad;
                 float x = Mathf.Cos(rad) * spacing;
                 float z = Mathf.Sin(rad) * spacing;
 
-                float bx = (float)(rand.NextDouble() * 0.16 - 0.08f);
-                float bz = (float)(rand.NextDouble() * 0.16 - 0.08f);
+                // Random micro bias
+                float bx = (float)(rand.NextDouble() * 0.18 - 0.09f);
+                float bz = (float)(rand.NextDouble() * 0.18 - 0.09f);
 
                 Vector3 result = new Vector3(x + bx, 0f, z + bz);
+
+                // Mark leader (center or index 0)
+                _isLeader = (index == 0);
+
+                // Clamp result for Y and sanity check
+                if (Mathf.Abs(result.y) > HeightTolerance) result.y = 0f;
                 return IsVectorValid(result) ? result : Vector3.zero;
             }
             catch
@@ -203,7 +229,7 @@ namespace AIRefactored.AI.Groups
                 return;
 
             int tick = Mathf.FloorToInt(now / DriftChangeInterval);
-            int driftSeed = unchecked((_bot?.ProfileId?.GetHashCode() ?? 0) ^ tick ^ 0x1F4B6C3);
+            int driftSeed = unchecked((_bot?.ProfileId?.GetHashCode() ?? 0) ^ tick ^ 0x3B83C0F);
             var rand = new System.Random(driftSeed);
 
             float angle = (float)(rand.NextDouble() * Mathf.PI * 2.0);
@@ -214,7 +240,7 @@ namespace AIRefactored.AI.Groups
                 Mathf.Sin(angle) * radius
             );
 
-            _nextDriftUpdate = now + DriftChangeInterval + (float)(rand.NextDouble() * 2.2f - 1.1f);
+            _nextDriftUpdate = now + DriftChangeInterval + (float)(rand.NextDouble() * 1.85f - 0.92f);
         }
 
         /// <summary>
@@ -224,7 +250,7 @@ namespace AIRefactored.AI.Groups
         {
             int seed = unchecked((_bot?.ProfileId?.GetHashCode() ?? 0) ^ 0xBADC0DE);
             var rand = new System.Random(seed);
-            return DriftChangeInterval * 0.66f + (float)(rand.NextDouble() * 0.66f);
+            return DriftChangeInterval * 0.6f + (float)(rand.NextDouble() * 0.7f);
         }
 
         /// <summary>
@@ -235,11 +261,14 @@ namespace AIRefactored.AI.Groups
             if (bot == null || group == null || string.IsNullOrEmpty(bot.ProfileId))
                 return -1;
 
+            int idx = 0;
             for (int i = 0; i < group.MembersCount; i++)
             {
                 var member = group.Member(i);
                 if (member != null && !member.IsDead && member.ProfileId == bot.ProfileId)
-                    return i;
+                    return idx;
+                if (member != null && !member.IsDead)
+                    idx++;
             }
             return -1;
         }
@@ -252,6 +281,25 @@ namespace AIRefactored.AI.Groups
             return !float.IsNaN(v.x) && !float.IsNaN(v.y) && !float.IsNaN(v.z)
                 && Mathf.Abs(v.x) < 1000f && Mathf.Abs(v.z) < 1000f && v.magnitude < 50f;
         }
+
+        #endregion
+
+        #region Debug/Introspection
+
+        /// <summary>
+        /// Returns true if this bot is considered the formation leader for their group.
+        /// </summary>
+        public bool IsLeader => _isLeader;
+
+        /// <summary>
+        /// Returns the cached index for this bot in the group.
+        /// </summary>
+        public int BotGroupIndex => _cachedIndex;
+
+        /// <summary>
+        /// Returns the most recent formation spread calculation for this group.
+        /// </summary>
+        public float LastFormationSpread => _formationSpread;
 
         #endregion
     }
