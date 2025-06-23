@@ -2,13 +2,11 @@
 //   AI-Refactored: BotPanicHandler.cs (Supreme Arbitration Overlay/Event, Ultra Expanded, Max Realism, June 2025)
 //   Overlay/event-only, triple-guarded panic, composure, squad sync, danger zone memory, pooled/no-GC, EFT-compliant, bulletproof, SPT/FIKA/headless/client safe.
 //   Fully expanded: squad contagion, calm sync, injury, flashbang, flare, voice, stutter, anti-teleport, no disables, zero allocs, error isolation, deep null-guarding, human error/failure, anticipation lock, arbitration overlays, recovery, and danger zone marking.
-//   MIT License.
+//   Personality and state-driven composure, error, "frozen" states, anticipation. MIT License.
 // </auto-generated>
 
 namespace AIRefactored.AI.Combat
 {
-    using System;
-    using System.Collections.Generic;
     using AIRefactored.AI.Combat.States;
     using AIRefactored.AI.Core;
     using AIRefactored.AI.Helpers;
@@ -17,32 +15,41 @@ namespace AIRefactored.AI.Combat
     using AIRefactored.Core;
     using EFT;
     using EFT.HealthSystem;
+    using System;
+    using System.Collections.Generic;
     using UnityEngine;
+    using static AIRefactored.AI.Memory.BotMemoryStore;
 
     /// <summary>
-    /// Handles panic overlays, retreat, stutter, flash, squad contagion, calm sync, personality composure, overlay arbitration.
-    /// All logic is event/overlay-only, pooled, zero-alloc, error-isolated, SPT/FIKA/headless/client safe.
-    /// 100% arbitration overlays: never disables, teleports, or allocates. All transitions are humanized, robust, null-guarded, personality-driven, and world-robust.
+    /// Fully expanded panic logic: overlays, composure, squad contagion/calm sync, injury, flashbang, danger, anticipation, stutter, error, voice.
+    /// 100% event/overlay, pooled, zero-alloc, never disables, maximum SPT/FIKA/headless/client parity, fully humanized, error-isolated, robust.
     /// </summary>
     public sealed class BotPanicHandler
     {
         #region Constants
 
-        private const float PanicDuration = 3.6f;
-        private const float RecoverySpeedBase = 0.21f;
-        private const float PanicCooldown = 3.6f;
+        private const float PanicDuration = 3.85f;
+        private const float RecoverySpeedBase = 0.22f;
+        private const float RecoveryJitter = 0.04f;
+        private const float PanicCooldown = 3.65f;
         private const float AnticipationLockDuration = 1.12f;
         private const float SquadCalmBoost = 0.31f;
-        private const float SquadPanicContagionChance = 0.32f;
-        private const float DangerZonePersist = 0.69f;
-        private const float MinComposureToNotPanic = 0.19f;
-        private const float OverlayMoveDedupSqr = 0.0001f;
-        private const float OverlayMoveCooldown = 0.39f;
-        private const float StutterBase = 0.13f;
+        private const float SquadPanicContagionChance = 0.33f;
+        private const float DangerZonePersist = 0.73f;
+        private const float MinComposureToNotPanic = 0.21f;
+        private const float OverlayMoveDedupSqr = 0.00009f;
+        private const float OverlayMoveCooldown = 0.38f;
+        private const float StutterBase = 0.14f;
+        private const float FrozenPanicChance = 0.05f;
         private const float SquadRadiusSqr = 256f;
         private const float StartleChanceBase = 0.18f;
         private const float LowHealthThreshold = 25.1f;
         private const float MaxNavmeshDeltaY = 2.6f;
+        private const float CalmCurveReturn = 0.17f;
+        private const float VoiceMaxChance = 0.79f;
+        private const float StutterContagionChance = 0.11f;
+        private const float VoiceCooldown = 1.07f;
+        private const float StutterExtraDelay = 0.16f;
         private const BotOverlayType OverlayType = BotOverlayType.Panic;
 
         #endregion
@@ -52,6 +59,7 @@ namespace AIRefactored.AI.Combat
         private BotOwner _bot;
         private BotComponentCache _cache;
         private float _composureLevel = 1f;
+        private float _composureLossCurve = 0f;
         private float _panicStartTime = -1f;
         private float _lastPanicExitTime = -99f;
         private float _anticipationLockUntil = -1f;
@@ -59,11 +67,11 @@ namespace AIRefactored.AI.Combat
         private float _panicStutterUntil = -1f;
         private bool _isPanicking;
         private bool _panicStutterActive;
+        private bool _isFrozenInPanic;
+        private float _frozenUntil = -1f;
         private Vector3 _lastOverlayMoveIssued = Vector3.zero;
         private float _lastOverlayMoveTime = -10f;
         private string _panicReason = "";
-
-        // Squad-wide calm share and stutter registry for max realism
         private readonly List<BotOwner> _squadStuttered = new List<BotOwner>(8);
 
         #endregion
@@ -72,7 +80,7 @@ namespace AIRefactored.AI.Combat
 
         public bool IsPanicking => _isPanicking;
         public float GetComposureLevel() => _composureLevel;
-        public bool IsAnticipationLocked => _isPanicking || _anticipationLockUntil > Time.time;
+        public bool IsAnticipationLocked => _isPanicking || _anticipationLockUntil > Time.time || _isFrozenInPanic;
         public string PanicReason => _panicReason;
 
         #endregion
@@ -109,6 +117,12 @@ namespace AIRefactored.AI.Combat
 
             try
             {
+                if (_isFrozenInPanic)
+                {
+                    if (now > _frozenUntil) _isFrozenInPanic = false;
+                    return;
+                }
+
                 if (_isPanicking)
                 {
                     if (_panicStutterActive && now < _panicStutterUntil)
@@ -127,7 +141,6 @@ namespace AIRefactored.AI.Combat
                 if (now < _lastPanicExitTime + PanicCooldown)
                     return;
 
-                // Event/overlay: panic triggers from threat or squad
                 if (ShouldPanicFromThreat(now, out string threatReason))
                 {
                     Vector3 retreat = ResolveRetreatDirection();
@@ -167,28 +180,23 @@ namespace AIRefactored.AI.Combat
                 var profile = _cache.AIRefactoredBotOwner?.PersonalityProfile;
                 if (profile == null || profile.IsFrenzied || profile.IsStubborn || profile.AggressionLevel > 0.86f) return;
 
-                // Startle/stutter logic (stutters entire squad sometimes)
-                if (profile.Caution > 0.7f && UnityEngine.Random.value < StartleChanceBase + profile.Caution * 0.41f)
+                // Startle/stutter logic
+                if (profile.Caution > 0.7f && UnityEngine.Random.value < StartleChanceBase + profile.Caution * 0.43f)
                 {
                     _panicStutterActive = true;
-                    _panicStutterUntil = now + StutterBase + UnityEngine.Random.Range(0.03f, 0.17f);
-                    if (_bot.BotsGroup != null)
-                    {
-                        _squadStuttered.Clear();
-                        for (int i = 0; i < _bot.BotsGroup.MembersCount; i++)
-                        {
-                            var mate = _bot.BotsGroup.Member(i);
-                            if (mate != null && mate != _bot && !mate.IsDead)
-                            {
-                                var mateCache = mate.GetComponent<BotComponentCache>();
-                                if (mateCache != null && UnityEngine.Random.value < 0.13f)
-                                {
-                                    mateCache.PanicHandler?.ApplyStutter(now);
-                                    _squadStuttered.Add(mate);
-                                }
-                            }
-                        }
-                    }
+                    _panicStutterUntil = now + StutterBase + UnityEngine.Random.Range(0.03f, 0.18f);
+                    StutterSquad(now);
+                }
+
+                // Frozen panic - rare, max realism/human error, “deer in headlights”
+                if (!_isFrozenInPanic && UnityEngine.Random.value < FrozenPanicChance * (1.0f - profile.Cohesion))
+                {
+                    _isFrozenInPanic = true;
+                    _frozenUntil = now + UnityEngine.Random.Range(0.7f, 1.25f);
+                    _composureLossCurve = Mathf.Max(_composureLossCurve, 0.75f);
+                    _panicReason = "frozen:" + part.ToString();
+                    TrySayPanic(now);
+                    return;
                 }
 
                 Vector3 retreat = (_bot.Position - info.HitPoint).normalized;
@@ -209,7 +217,7 @@ namespace AIRefactored.AI.Combat
         public void ApplyStutter(float now)
         {
             _panicStutterActive = true;
-            _panicStutterUntil = now + StutterBase + UnityEngine.Random.Range(0.01f, 0.13f);
+            _panicStutterUntil = now + StutterBase + UnityEngine.Random.Range(0.01f, 0.14f) + StutterExtraDelay * UnityEngine.Random.value;
         }
 
         private bool ShouldPanicFromThreat(float now, out string reason)
@@ -220,14 +228,15 @@ namespace AIRefactored.AI.Combat
                 var profile = _cache?.AIRefactoredBotOwner?.PersonalityProfile;
                 if (profile == null || profile.IsFrenzied || profile.IsStubborn) return false;
 
+                // Danger/flash/flare/suppression/low composure/low health
                 if (_cache?.FlashGrenade?.IsFlashed() == true) { reason = "flash"; return true; }
                 if (_cache?.Perception?.IsSuppressed == true) { reason = "suppression"; return true; }
-                if (_composureLevel < MinComposureToNotPanic) { reason = "low composure"; return true; }
+                if (_composureLevel < MinComposureToNotPanic || _composureLossCurve > 0.88f) { reason = "low composure"; return true; }
 
                 ValueStruct health = _bot.HealthController?.GetBodyPartHealth(EBodyPart.Common) ?? default(ValueStruct);
                 if (health.Current < LowHealthThreshold) { reason = "low health"; return true; }
 
-                // Panic can spread from squad
+                // Squad panic contagion - but ignore for Stubborn/Frenzied
                 if (_bot.BotsGroup != null)
                 {
                     for (int i = 0; i < _bot.BotsGroup.MembersCount; i++)
@@ -291,6 +300,8 @@ namespace AIRefactored.AI.Combat
             {
                 if (_panicStutterActive && now < _panicStutterUntil)
                     return;
+                if (_isFrozenInPanic && now < _frozenUntil)
+                    return;
                 if (BotMovementHelper.IsMovementPaused(_bot) || BotMovementHelper.IsInInteractionState(_bot))
                     return;
                 if (!BotOverlayManager.CanIssueMove(_bot, OverlayType))
@@ -310,6 +321,7 @@ namespace AIRefactored.AI.Combat
                     _panicReason = reason;
                     _panicStartTime = now;
                     _composureLevel = 0f;
+                    _composureLossCurve = 1.0f;
                     _lastOverlayMoveIssued = fallback;
                     _lastOverlayMoveTime = now;
                     _anticipationLockUntil = now + AnticipationLockDuration;
@@ -355,6 +367,8 @@ namespace AIRefactored.AI.Combat
                 _panicReason = "";
                 _lastPanicExitTime = now;
                 _anticipationLockUntil = now + AnticipationLockDuration;
+                _isFrozenInPanic = false;
+
                 if (_bot.BotsGroup != null)
                 {
                     for (int i = 0; i < _bot.BotsGroup.MembersCount; i++)
@@ -364,7 +378,7 @@ namespace AIRefactored.AI.Combat
                         {
                             var squadCache = squadBot.GetComponent<BotComponentCache>();
                             if (squadCache?.PanicHandler != null && !squadCache.PanicHandler.IsPanicking)
-                                _composureLevel = Mathf.Clamp01(_composureLevel + SquadCalmBoost);
+                                _composureLevel = Mathf.Clamp01(_composureLevel + SquadCalmBoost + CalmCurveReturn);
                         }
                     }
                 }
@@ -385,11 +399,14 @@ namespace AIRefactored.AI.Combat
                 var profile = _cache?.AIRefactoredBotOwner?.PersonalityProfile;
                 if (profile != null)
                 {
-                    if (profile.Caution > 0.71f) personalityMod = 0.59f;
-                    else if (profile.AggressionLevel > 0.63f) personalityMod = 1.35f;
+                    if (profile.Caution > 0.71f) personalityMod = 0.61f;
+                    else if (profile.AggressionLevel > 0.61f) personalityMod = 1.42f;
                 }
-                float mod = UnityEngine.Random.Range(0.91f, 1.17f) * personalityMod;
-                _composureLevel = Mathf.Clamp01(_composureLevel + deltaTime * RecoverySpeedBase * mod);
+                float curveReturn = Mathf.Clamp01(_composureLossCurve * 0.47f);
+                float mod = UnityEngine.Random.Range(0.93f, 1.17f) * personalityMod + curveReturn;
+                _composureLevel = Mathf.Clamp01(_composureLevel + deltaTime * RecoverySpeedBase * mod + RecoveryJitter * UnityEngine.Random.value);
+                if (_composureLossCurve > 0.01f)
+                    _composureLossCurve = Mathf.MoveTowards(_composureLossCurve, 0f, deltaTime * 0.37f);
             }
             catch (Exception ex)
             {
@@ -414,10 +431,29 @@ namespace AIRefactored.AI.Combat
 
         private void TrySayPanic(float now)
         {
-            if (_bot.BotTalk != null && now - _lastVoiceTime > 1.09f && UnityEngine.Random.value < 0.74f)
+            if (_bot.BotTalk != null && now - _lastVoiceTime > VoiceCooldown && UnityEngine.Random.value < VoiceMaxChance)
             {
                 try { _bot.BotTalk.TrySay(EPhraseTrigger.OnBeingHurt); } catch { }
                 _lastVoiceTime = now;
+            }
+        }
+
+        private void StutterSquad(float now)
+        {
+            if (_bot.BotsGroup == null) return;
+            _squadStuttered.Clear();
+            for (int i = 0; i < _bot.BotsGroup.MembersCount; i++)
+            {
+                var mate = _bot.BotsGroup.Member(i);
+                if (mate != null && mate != _bot && !mate.IsDead)
+                {
+                    var mateCache = mate.GetComponent<BotComponentCache>();
+                    if (mateCache != null && UnityEngine.Random.value < StutterContagionChance)
+                    {
+                        mateCache.PanicHandler?.ApplyStutter(now);
+                        _squadStuttered.Add(mate);
+                    }
+                }
             }
         }
 

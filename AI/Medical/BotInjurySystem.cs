@@ -197,6 +197,11 @@ namespace AIRefactored.AI.Medical
             BotBrain.ScheduleAfter(_cache.Bot, UnityEngine.Random.Range(delay, delay + 0.13f), action);
         }
 
+        public bool NeedsImmediateHeal()
+        {
+            return _isActive && _hasFreshInjury && Time.time >= _nextHealTime;
+        }
+
         private bool CanOverlay(float now)
         {
             if (!_hasFreshInjury || now < _nextHealTime || (now - _lastArbTime < ArbitrationWindow))
